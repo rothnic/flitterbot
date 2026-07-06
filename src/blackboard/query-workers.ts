@@ -119,6 +119,14 @@ export function updateWorkerHostStatus(
   return getWorkerHost(db, hostId)!;
 }
 
+const ACTIVE_WORKER_SESSION_STATUSES: WorkerSessionStatus[] = [
+  "starting",
+  "running",
+  "waiting_for_user",
+];
+
+const ACTIVE_WORKER_TURN_STATUSES: WorkerTurnStatus[] = ["queued", "running", "waiting_for_user"];
+
 export type InsertWorkerSessionInput = {
   workerSessionId?: string;
   runnerType: WorkerRunnerType;
@@ -298,7 +306,7 @@ export function listWorkerTurnsBySession(
     `SELECT *
      FROM worker_turns
      WHERE worker_session_id = ?
-     ORDER BY started_at ASC`,
+     ORDER BY started_at ASC, rowid ASC`,
     workerSessionId,
   );
 }
@@ -312,7 +320,7 @@ export function getLatestWorkerTurnBySession(
       `SELECT *
        FROM worker_turns
        WHERE worker_session_id = ?
-       ORDER BY started_at DESC
+       ORDER BY started_at DESC, rowid DESC
        LIMIT 1`,
       workerSessionId,
     ) ?? null
@@ -351,6 +359,64 @@ export function updateWorkerTurn(
     workerTurnId,
   );
   return getWorkerTurn(db, workerTurnId)!;
+}
+
+export type ReconciledInterruptedWorkerSession = {
+  workerSessionId: string;
+  workerTurnId: string | null;
+  previousStatus: WorkerSessionStatus;
+  previousTurnStatus: WorkerTurnStatus | null;
+};
+
+export function reconcileInterruptedCodexWorkerSessions(
+  db: BlackboardDatabase,
+  input: { reason: string; runtimeInstanceId?: string },
+): ReconciledInterruptedWorkerSession[] {
+  const sessions = db.all<WorkerSessionRow>(
+    `SELECT *
+     FROM worker_sessions
+     WHERE runner_type = 'codex_app_server'
+       AND status IN (${ACTIVE_WORKER_SESSION_STATUSES.map(() => "?").join(", ")})
+     ORDER BY last_event_at ASC`,
+    ...ACTIVE_WORKER_SESSION_STATUSES,
+  );
+  const reconciled: ReconciledInterruptedWorkerSession[] = [];
+  const completedAt = nowIso();
+  for (const session of sessions) {
+    const latestTurn = getLatestWorkerTurnBySession(db, session.worker_session_id);
+    const previousTurnStatus = latestTurn?.status ?? null;
+    updateWorkerSession(db, session.worker_session_id, {
+      status: "unreachable",
+      errorMessage: input.reason,
+      completedAt,
+    });
+    if (latestTurn && ACTIVE_WORKER_TURN_STATUSES.includes(latestTurn.status)) {
+      updateWorkerTurn(db, latestTurn.worker_turn_id, {
+        status: "failed",
+        errorMessage: input.reason,
+        completedAt,
+      });
+    }
+    appendWorkerEvent(db, {
+      workerSessionId: session.worker_session_id,
+      workerTurnId: latestTurn?.worker_turn_id ?? null,
+      eventType: "worker/recovery/interrupted",
+      eventSource: "flitterbot",
+      payload: {
+        reason: input.reason,
+        runtimeInstanceId: input.runtimeInstanceId ?? null,
+        previousStatus: session.status,
+        previousTurnStatus,
+      },
+    });
+    reconciled.push({
+      workerSessionId: session.worker_session_id,
+      workerTurnId: latestTurn?.worker_turn_id ?? null,
+      previousStatus: session.status,
+      previousTurnStatus,
+    });
+  }
+  return reconciled;
 }
 
 export type AppendWorkerEventInput = {

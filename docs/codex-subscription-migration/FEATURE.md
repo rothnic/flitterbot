@@ -321,8 +321,11 @@ Verified on 2026-07-06:
 - `pnpm run e2e:codex-worker-server-restart -- --cwd "$PWD" --timeout-ms 180000`
   proves the bearer-protected HTTP worker control API can launch, inspect, and
   resume a Codex worker across a real `src/server.ts` process restart. It also
-  verifies unauthorized launch rejection, oversized body rejection, and
-  persisted active-session follow-up rejection after restart.
+  verifies unauthorized launch rejection, oversized body rejection, startup
+  PID-guard protection before reconciliation, synthetic persisted-active
+  session reconciliation to `unreachable`/failed, the
+  `worker/recovery/interrupted` event, and explicit resume through the stored
+  Codex thread ID.
 - `pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000`
   proves the same runtime-recreation recovery path against an SSH-backed
   `vps-gw` worker host.

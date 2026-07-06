@@ -212,6 +212,21 @@ async function stopServer(handle) {
   });
 }
 
+async function waitForServerExit(handle, timeoutMs) {
+  if (handle.child.exitCode !== null || handle.child.signalCode) {
+    return { code: handle.child.exitCode, signal: handle.child.signalCode };
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`server did not exit within ${timeoutMs}ms`));
+    }, timeoutMs);
+    handle.child.once("exit", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal });
+    });
+  });
+}
+
 async function requestJson(baseUrl, method, pathname, body) {
   const { response, json, text } = await requestWithAuth(baseUrl, method, pathname, body);
   if (!response.ok) {
@@ -307,6 +322,7 @@ async function main() {
   process.env.CODEX_HOME = env.CODEX_HOME;
   const configPath = writeFreshConfig(tempHome, { ...opts, port });
   let firstServer;
+  let duplicateServer;
   let secondServer;
 
   try {
@@ -340,6 +356,67 @@ async function main() {
       "flitterbot-server-restart-ok",
       opts.timeoutMs,
     );
+
+    const [{ loadConfig }, { openBlackboard }, workers] = await Promise.all([
+      import("../src/config/load-config.ts"),
+      import("../src/blackboard/db.ts"),
+      import("../src/blackboard/query-workers.ts"),
+    ]);
+    const config = loadConfig();
+    const db = openBlackboard(config.blackboardPath);
+    let interruptedSessionId;
+    let interruptedTurnId;
+    try {
+      interruptedSessionId = workers.insertWorkerSession(db, {
+        runnerType: "codex_app_server",
+        status: "running",
+        hostId: launch.workerHostId,
+        cwd: opts.workerCwd,
+        externalThreadId: launch.threadId,
+      }).worker_session_id;
+      interruptedTurnId = workers.insertWorkerTurn(db, {
+        workerSessionId: interruptedSessionId,
+        status: "running",
+        prompt: "Simulated interrupted worker turn before server process restart.",
+      }).worker_turn_id;
+    } finally {
+      db.close();
+    }
+
+    duplicateServer = spawnServer(env);
+    const duplicateExit = await waitForServerExit(duplicateServer, 10_000);
+    assert(
+      duplicateExit.code !== 0,
+      `duplicate server should fail the pid guard, got exit ${JSON.stringify(duplicateExit)}`,
+    );
+    assert(
+      duplicateServer.output.stderr.includes("already running"),
+      `duplicate server did not report pid guard failure: ${duplicateServer.output.stderr || duplicateServer.output.stdout}`,
+    );
+    const verifyDuplicateDb = openBlackboard(config.blackboardPath);
+    try {
+      const duplicateSession = workers.getWorkerSession(verifyDuplicateDb, interruptedSessionId);
+      const duplicateTurn = workers.getWorkerTurn(verifyDuplicateDb, interruptedTurnId);
+      const duplicateRecoveryEvent = verifyDuplicateDb.get(
+        "SELECT event_type FROM worker_events WHERE worker_session_id = ? AND event_type = 'worker/recovery/interrupted' LIMIT 1",
+        interruptedSessionId,
+      );
+      assert(
+        duplicateSession?.status === "running",
+        `duplicate startup should not reconcile active session before pid guard, got ${duplicateSession?.status}`,
+      );
+      assert(
+        duplicateTurn?.status === "running",
+        `duplicate startup should not fail active turn before pid guard, got ${duplicateTurn?.status}`,
+      );
+      assert(
+        !duplicateRecoveryEvent,
+        "duplicate startup should not append worker/recovery/interrupted before pid guard",
+      );
+    } finally {
+      verifyDuplicateDb.close();
+    }
+
     await stopServer(firstServer);
 
     secondServer = spawnServer(env);
@@ -354,41 +431,55 @@ async function main() {
       recovered.session?.external_thread_id === launch.threadId,
       "second server did not read the persisted Codex thread id",
     );
+    const interruptedRecovered = await requestJson(
+      baseUrl,
+      "GET",
+      `/api/workers/${encodeURIComponent(interruptedSessionId)}`,
+    );
+    assert(
+      interruptedRecovered.session?.status === "unreachable",
+      `interrupted worker session should be unreachable after startup reconciliation, got ${interruptedRecovered.session?.status}`,
+    );
+    assert(
+      latest(interruptedRecovered.turns ?? [])?.status === "failed",
+      `interrupted worker turn should be failed after startup reconciliation, got ${latest(interruptedRecovered.turns ?? [])?.status}`,
+    );
 
-    const [{ loadConfig }, { openBlackboard }, workers] = await Promise.all([
-      import("../src/config/load-config.ts"),
-      import("../src/blackboard/db.ts"),
-      import("../src/blackboard/query-workers.ts"),
-    ]);
-    const config = loadConfig();
-    const db = openBlackboard(config.blackboardPath);
-    let persistedRunningSessionId;
+    const verifyInterruptedDb = openBlackboard(config.blackboardPath);
     try {
-      persistedRunningSessionId = workers.insertWorkerSession(db, {
-        runnerType: "codex_app_server",
-        status: "running",
-        hostId: launch.workerHostId,
-        cwd: opts.workerCwd,
-        externalThreadId: launch.threadId,
-      }).worker_session_id;
+      const recoveryEvent = verifyInterruptedDb.get(
+        "SELECT event_type FROM worker_events WHERE worker_session_id = ? AND event_type = 'worker/recovery/interrupted' LIMIT 1",
+        interruptedSessionId,
+      );
+      assert(
+        recoveryEvent?.event_type === "worker/recovery/interrupted",
+        "missing worker/recovery/interrupted event",
+      );
     } finally {
-      db.close();
+      verifyInterruptedDb.close();
     }
+
     const persistedRunningFollowup = await requestWithAuth(
       baseUrl,
       "POST",
-      `/api/workers/${encodeURIComponent(persistedRunningSessionId)}/followup`,
+      `/api/workers/${encodeURIComponent(interruptedSessionId)}/followup`,
       {
-        prompt: "Reply exactly: flitterbot-server-running-session-should-not-start",
+        prompt: "Reply exactly: flitterbot-server-interrupted-recovered-ok",
       },
     );
     assert(
-      persistedRunningFollowup.response.status === 400,
-      `persisted running follow-up should return 400, got ${persistedRunningFollowup.response.status}`,
+      persistedRunningFollowup.response.status === 200,
+      `interrupted follow-up should return 200, got ${persistedRunningFollowup.response.status}: ${persistedRunningFollowup.text}`,
     );
     assert(
-      String(persistedRunningFollowup.json?.error ?? "").includes("still running"),
-      `persisted running follow-up returned unexpected error: ${persistedRunningFollowup.text}`,
+      persistedRunningFollowup.json?.threadId === launch.threadId,
+      "interrupted follow-up did not resume the stored thread id",
+    );
+    await waitForWorkerOutput(
+      baseUrl,
+      interruptedSessionId,
+      "flitterbot-server-interrupted-recovered-ok",
+      opts.timeoutMs,
     );
 
     const followup = await requestJson(
@@ -433,11 +524,17 @@ async function main() {
       turnCount: finalStatus.turns.length,
       unauthorizedLaunchStatus: unauthorizedLaunch.status,
       oversizedLaunchStatus: oversizedLaunch.response.status,
-      persistedRunningFollowupStatus: persistedRunningFollowup.response.status,
+      duplicateServerExit: duplicateExit,
+      interruptedSessionId,
+      interruptedTurnId,
+      interruptedRecoveryStatus: interruptedRecovered.session.status,
+      interruptedTurnRecoveryStatus: latest(interruptedRecovered.turns).status,
+      interruptedFollowupStatus: persistedRunningFollowup.response.status,
     };
     console.log(JSON.stringify(result, null, 2));
   } finally {
     if (secondServer) await stopServer(secondServer).catch(() => {});
+    if (duplicateServer) await stopServer(duplicateServer).catch(() => {});
     if (firstServer) await stopServer(firstServer).catch(() => {});
     if (!opts.keep) fs.rmSync(tempHome, { recursive: true, force: true });
   }

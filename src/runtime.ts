@@ -47,6 +47,7 @@ import {
   getWorkerSession,
   listWorkerSessionsByStream,
   listWorkerTurnsBySession,
+  reconcileInterruptedCodexWorkerSessions,
   updateWorkerSession,
   updateWorkerTurn,
 } from "./blackboard/query-workers.ts";
@@ -159,6 +160,7 @@ export class ControlSurfaceRuntime {
   readonly sessionManager: PiSessionManager;
   server?: http.Server;
   private stopping = false;
+  private wrotePidFile = false;
   private maintenanceTimer?: NodeJS.Timeout;
   private whatsappStatusWatcher?: fs.FSWatcher;
   private readonly activeCodexWorkers = new Map<string, ActiveCodexWorker>();
@@ -201,6 +203,14 @@ export class ControlSurfaceRuntime {
 
   async start(): Promise<void> {
     this.ensurePidFile();
+    const reconciledWorkers = reconcileInterruptedCodexWorkerSessions(this.blackboard, {
+      reason:
+        "controller runtime started without an active Codex app-server client for this worker",
+      runtimeInstanceId: this.runtimeInstanceId,
+    });
+    if (reconciledWorkers.length > 0) {
+      this.log(`reconciled ${reconciledWorkers.length} interrupted Codex worker session(s)`);
+    }
 
     // Legacy work streams predate per-user ownership; in a single-user history they were all the
     // owner's, so adopt unowned work streams to the configured default user for owner-scoped routing.
@@ -308,7 +318,11 @@ export class ControlSurfaceRuntime {
       this.server.close(() => resolve());
     });
     try {
-      if (fs.existsSync(this.config.controlSurfacePidPath))
+      if (
+        this.wrotePidFile &&
+        readPid(this.config.controlSurfacePidPath) === process.pid &&
+        fs.existsSync(this.config.controlSurfacePidPath)
+      )
         fs.unlinkSync(this.config.controlSurfacePidPath);
     } catch {}
     this.blackboard.close();
@@ -3179,6 +3193,7 @@ export class ControlSurfaceRuntime {
     }
     fs.mkdirSync(path.dirname(this.config.controlSurfacePidPath), { recursive: true });
     fs.writeFileSync(this.config.controlSurfacePidPath, `${process.pid}\n`, "utf8");
+    this.wrotePidFile = true;
   }
 
   log(message: string): void {
