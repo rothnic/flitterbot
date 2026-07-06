@@ -59,6 +59,9 @@ Runtime tuning: edit `~/.flitterbot/config.json` — keys are self-describing. T
   sandbox/approval policy, injected context, developer instructions, and skill
   hints. The default install includes `coding` (`gpt-5.5`) and `light`
   (`gpt-5.4-mini`).
+- `workerHosts` — local or remote machines that can run Codex workers. Start
+  with `local-stdio`; add `ssh-stdio` hosts such as `vps-dev` when the remote
+  machine has the repo, dependencies, `codex`, and Codex auth.
 
 Skills load from `~/.claude/skills`, `~/.agents/skills`, bundled `~/.flitterbot/skills`, then `extraSkillPaths`. Flitterbot agent instructions load from `~/.flitterbot/control-surface/agent/AGENTS.md`; the installer creates this file if missing and leaves user edits intact. Tasks are managed through Flitterbot's bundled task API at `~/.flitterbot/data/tasks`; local notes live under `~/.flitterbot/data/notes`.
 
@@ -69,13 +72,16 @@ Skills load from `~/.claude/skills`, `~/.agents/skills`, bundled `~/.flitterbot/
 ~/.flitterbot/bin/flitterbot-wa   start | status | stop | auth
 pnpm --dir web dev                          # web UI
 pnpm run control-surface                    # run from source
+pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD"
+pnpm run doctor:codex-worker-hosts -- --fresh-local --cwd "$PWD"
+pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
 node ~/.flitterbot/uninstall.mjs [--meta]   # remove hooks+scheduler (+~/.flitterbot/)
 ```
 
 ## Troubleshooting
 
 - *`flitterbot-up start` fails* — check `~/.flitterbot/config.json`, `control-surface.log`; verify `node`/`claude`/`tmux`/`sqlite3` on PATH.
-- *`openai-codex` Pi prompts fail with "No API key found"* — Pi does not read `~/.codex/auth.json`; use Pi provider login for the current orchestrator path or implement the Codex app-server runner before relying on Codex subscription auth only.
+- *`openai-codex` Pi prompts fail with "No API key found"* — Pi does not read `~/.codex/auth.json`; use Pi provider login for orchestrator prompts. Codex app-server worker execution can still use Codex CLI subscription auth.
 - *WhatsApp auth errors* — re-run `flitterbot-wa auth`.
 - *Hooks not firing* — check `~/.claude/settings.json`, `~/.flitterbot/logs/hooks-errors.log`. Async, 15s timeout.
 - *Runtime restarts after stop* — scheduler installed; run uninstaller.

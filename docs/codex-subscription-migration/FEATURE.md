@@ -320,3 +320,4 @@ Manual proof:
 - [003 Runtime E2E Fresh Install Proof](./003-runtime-e2e-fresh-install-proof.md)
 - [004 Worker Host Registry And SSH Readiness](./004-worker-host-registry-ssh.md)
 - [005 Worker UI Visibility](./005-worker-ui-visibility.md)
+- [006 Subscription Auth Closure](./006-subscription-auth-closure.md)
