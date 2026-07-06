@@ -26,6 +26,8 @@ without querying SQLite directly.
   session rows for the stream.
 - The web side panel displays a `Codex Workers` section when worker sessions
   exist.
+- The side panel frames the area as worker activity, with Codex workers first
+  and legacy tmux/Claude rows explicitly labeled as `Legacy Sessions`.
 - Each worker row shows status, worker session id, profile/model, host, thread
   id, and latest final output or error.
 - Existing legacy downstream/tmux session rendering remains available.
@@ -59,8 +61,16 @@ Manual UI proof:
   `GET /api/streams/:streamId/workers` returned one item with final output
   `worker-ui-ok`.
 - The repeatable smoke verified the browser worker API returns host, profile,
-  model, status, thread id, and final output, and checked the stream side panel
-  source still renders the `Codex Workers` section with profile/model, host,
-  thread, and final-output fields.
+  model, status, thread id, and final output, then rendered the stream side
+  panel through Vite SSR with a seeded Codex worker and legacy tmux session.
+- The rendered proof verified `Worker Activity` contains `Codex Workers` before
+  the worker output, then `Legacy Sessions` before the tmux row, without showing
+  the empty state.
+- The rendered proof also covers the no-attached-stream path, where legacy
+  sessions are empty and the disabled worker query still needs to show `No
+  Codex workers or legacy sessions.` instead of a blank panel.
+- The rendered proof distinguishes pending worktree context from resolved
+  no-stream state, so the empty state does not flash before worker lookup can
+  know whether a stream id exists.
 - `pnpm --dir web run build` passed with the existing Vite large-chunk warning.
 - `pnpm run audit` passed.

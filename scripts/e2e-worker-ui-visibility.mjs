@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 function parseArgs(argv) {
   const opts = { cwd: process.cwd(), keep: false };
@@ -117,6 +119,213 @@ function assertSourceContains(filePath, patterns) {
   }
 }
 
+function assertInOrder(content, patterns, label) {
+  let cursor = -1;
+  for (const pattern of patterns) {
+    const index = content.indexOf(pattern, cursor + 1);
+    assert(index !== -1, `${label} does not contain ${pattern} after index ${cursor}`);
+    cursor = index;
+  }
+}
+
+async function importFromWeb(webRoot, specifier) {
+  const webRequire = createRequire(path.join(webRoot, "package.json"));
+  return import(pathToFileURL(webRequire.resolve(specifier)).href);
+}
+
+async function assertRenderedPanelOrder(opts) {
+  const webRoot = path.join(opts.cwd, "web");
+  const [{ createServer: createViteServer }, React, ReactDomServer] = await Promise.all([
+    importFromWeb(webRoot, "vite"),
+    importFromWeb(webRoot, "react"),
+    importFromWeb(webRoot, "react-dom/server"),
+  ]);
+
+  const vite = await createViteServer({
+    root: webRoot,
+    configFile: path.join(webRoot, "vite.config.ts"),
+    server: { middlewareMode: true },
+    appType: "custom",
+    logLevel: "error",
+  });
+
+  try {
+    const [{ DownstreamSessionsPanel }, queries, ReactQuery] = await Promise.all([
+      vite.ssrLoadModule("/src/components/downstream-sessions-panel.tsx"),
+      vite.ssrLoadModule("/src/lib/queries.ts"),
+      vite.ssrLoadModule("@tanstack/react-query"),
+    ]);
+
+    const piSessionId = "pi-worker-ui-e2e";
+    const streamId = "stream-worker-ui-e2e";
+    const queryClient = new ReactQuery.QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    queryClient.setQueryData(queries.streamsWorktreeQueryOptions(piSessionId).queryKey, {
+      streamId,
+      name: "worker-ui-e2e",
+      repoPath: opts.cwd,
+      repo: "flitterbot",
+      worktreePath: opts.cwd,
+      branch: "codex-subscription-e2e",
+      baseBranch: "main",
+      cwd: opts.cwd,
+      cwdAbsolute: opts.cwd,
+      copyPaths: [],
+      postCreate: [],
+      configuredBaseRef: null,
+    });
+    queryClient.setQueryData(queries.streamsWorkerSessionsQueryOptions(streamId).queryKey, [
+      {
+        workerSessionId: "worker-ui-session-rendered",
+        runnerType: "codex_app_server",
+        status: "completed",
+        hostId: "local",
+        hostDisplayName: "Local machine",
+        connectionMode: "local-stdio",
+        cwd: opts.cwd,
+        repoPath: opts.cwd,
+        worktreePath: opts.cwd,
+        branch: "codex-subscription-e2e",
+        modelProvider: "openai-codex",
+        modelId: "gpt-5.4-mini",
+        profileId: "light",
+        externalThreadId: "thread-worker-ui-e2e",
+        externalSessionId: null,
+        approvalPolicy: "never",
+        sandboxPolicy: "workspace-write",
+        startedAt: "2026-07-06T00:00:00.000Z",
+        lastEventAt: "2026-07-06T00:00:01.000Z",
+        completedAt: "2026-07-06T00:00:01.000Z",
+        errorMessage: null,
+        turns: [
+          {
+            workerTurnId: "turn-worker-ui-e2e",
+            externalTurnId: "external-turn-worker-ui-e2e",
+            status: "completed",
+            prompt: "Reply exactly: worker-ui-ok",
+            finalOutput: "worker-ui-ok",
+            startedAt: "2026-07-06T00:00:00.000Z",
+            completedAt: "2026-07-06T00:00:01.000Z",
+            errorMessage: null,
+          },
+        ],
+      },
+    ]);
+    queryClient.setQueryData(queries.streamsDownstreamSessionsQueryOptions(piSessionId).queryKey, [
+      {
+        sessionId: "legacy-tmux-session-rendered",
+        status: "idle",
+        streamId,
+        streamName: "worker-ui-e2e",
+        tmuxSession: "legacy-tmux",
+        cwd: opts.cwd,
+        taskDescription: "legacy tmux worker",
+        project: "flitterbot",
+      },
+    ]);
+
+    const html = ReactDomServer.renderToString(
+      React.createElement(
+        ReactQuery.QueryClientProvider,
+        { client: queryClient },
+        React.createElement(DownstreamSessionsPanel, {
+          piSessionId,
+          piSessionStatus: "waiting_for_sessions",
+        }),
+      ),
+    );
+
+    assertInOrder(
+      html,
+      ["Worker Activity", "Codex Workers", "worker-ui-ok", "Legacy Sessions", "legacy-tmux"],
+      "rendered side panel",
+    );
+    assert(
+      !html.includes("No Codex workers or legacy sessions."),
+      "rendered side panel showed an empty state while worker and legacy sessions existed",
+    );
+
+    const emptyPiSessionId = "pi-worker-ui-empty-e2e";
+    const emptyQueryClient = new ReactQuery.QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    emptyQueryClient.setQueryData(
+      queries.streamsWorktreeQueryOptions(emptyPiSessionId).queryKey,
+      {
+        streamId: null,
+        name: "worker-ui-empty-e2e",
+        repoPath: null,
+        repo: null,
+        worktreePath: null,
+        branch: null,
+        baseBranch: null,
+        cwd: null,
+        cwdAbsolute: null,
+        copyPaths: [],
+        postCreate: [],
+        configuredBaseRef: null,
+      },
+    );
+    emptyQueryClient.setQueryData(
+      queries.streamsDownstreamSessionsQueryOptions(emptyPiSessionId).queryKey,
+      [],
+    );
+    const emptyHtml = ReactDomServer.renderToString(
+      React.createElement(
+        ReactQuery.QueryClientProvider,
+        { client: emptyQueryClient },
+        React.createElement(DownstreamSessionsPanel, {
+          piSessionId: emptyPiSessionId,
+          piSessionStatus: "waiting_for_sessions",
+        }),
+      ),
+    );
+    assertInOrder(
+      emptyHtml,
+      ["Worker Activity", "No Codex workers or legacy sessions."],
+      "rendered no-stream empty side panel",
+    );
+    assert(
+      !emptyHtml.includes("Loading Codex workers"),
+      "rendered no-stream empty side panel showed Codex worker loading copy",
+    );
+
+    const pendingWorktreePiSessionId = "pi-worker-ui-pending-worktree-e2e";
+    const pendingWorktreeQueryClient = new ReactQuery.QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    pendingWorktreeQueryClient.setQueryData(
+      queries.streamsDownstreamSessionsQueryOptions(pendingWorktreePiSessionId).queryKey,
+      [],
+    );
+    const pendingWorktreeHtml = ReactDomServer.renderToString(
+      React.createElement(
+        ReactQuery.QueryClientProvider,
+        { client: pendingWorktreeQueryClient },
+        React.createElement(DownstreamSessionsPanel, {
+          piSessionId: pendingWorktreePiSessionId,
+          piSessionStatus: "waiting_for_sessions",
+        }),
+      ),
+    );
+    assertInOrder(
+      pendingWorktreeHtml,
+      ["Worker Activity", "Loading worker context"],
+      "rendered pending-worktree side panel",
+    );
+    assert(
+      !pendingWorktreeHtml.includes("No Codex workers or legacy sessions."),
+      "rendered pending-worktree side panel showed the empty state before worktree resolved",
+    );
+
+    return html.length + emptyHtml.length + pendingWorktreeHtml.length;
+  } finally {
+    await vite.close();
+  }
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "flitterbot-worker-ui-e2e-home-"));
@@ -209,7 +418,10 @@ async function main() {
     assert(item.turns[0].finalOutput === "worker-ui-ok", "final output mismatch");
 
     assertSourceContains(path.join(process.cwd(), "web/src/components/downstream-sessions-panel.tsx"), [
+      "Worker Activity",
       "Codex Workers",
+      "Legacy Sessions",
+      "No Codex workers or legacy sessions.",
       "worker.hostDisplayName",
       "worker.externalThreadId",
       "workerLabel(worker)",
@@ -223,6 +435,7 @@ async function main() {
       "fetchWorkerSessions",
       "/api/streams/${encodeURIComponent(data.streamId)}/workers",
     ]);
+    const renderedPanelBytes = await assertRenderedPanelOrder(opts);
 
     console.log(
       JSON.stringify(
@@ -237,6 +450,7 @@ async function main() {
           workerSessionId: session.worker_session_id,
           workerTurnId: turn.worker_turn_id,
           apiItems: body.items.length,
+          renderedPanelBytes,
         },
         null,
         2,

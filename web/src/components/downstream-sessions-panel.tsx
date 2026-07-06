@@ -300,7 +300,7 @@ export function DownstreamSessionsPanel({
     return (
       <div className="flex flex-col h-full border-l border-border bg-background">
         <p className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-          Active Sessions
+          Worker Activity
         </p>
         <div className="flex-1 flex items-center justify-center">
           <p className="text-xs text-muted-foreground">Waiting for session…</p>
@@ -435,16 +435,16 @@ export function DownstreamSessionsPanel({
       ) : (
         <div className="flex-1 overflow-y-auto">
           <p className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-            Active Sessions
+            Worker Activity
           </p>
           {isPending && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">Loading sessions…</p>
+            <p className="px-4 py-3 text-xs text-muted-foreground">Loading legacy sessions…</p>
           )}
           {isError && (
-            <p className="px-4 py-3 text-xs text-destructive">Failed to load sessions.</p>
+            <p className="px-4 py-3 text-xs text-destructive">Failed to load legacy sessions.</p>
           )}
-          {data && data.length === 0 && (workerSessionsQuery.data?.length ?? 0) === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">No active sessions</p>
+          {!isPending && worktreeQuery.isPending && (
+            <p className="px-4 py-3 text-xs text-muted-foreground">Loading worker context…</p>
           )}
           {workerSessionsQuery.isPending && streamId && (
             <p className="px-4 py-3 text-xs text-muted-foreground">Loading Codex workers…</p>
@@ -452,6 +452,15 @@ export function DownstreamSessionsPanel({
           {workerSessionsQuery.isError && (
             <p className="px-4 py-3 text-xs text-destructive">Failed to load Codex workers.</p>
           )}
+          {data &&
+            data.length === 0 &&
+            !worktreeQuery.isPending &&
+            (!streamId || !workerSessionsQuery.isPending) &&
+            (workerSessionsQuery.data?.length ?? 0) === 0 && (
+              <p className="px-4 py-3 text-xs text-muted-foreground">
+                No Codex workers or legacy sessions.
+              </p>
+            )}
           {(workerSessionsQuery.data?.length ?? 0) > 0 && (
             <div className="border-b border-border pb-2">
               <p className="px-4 pt-1 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
@@ -504,6 +513,9 @@ export function DownstreamSessionsPanel({
           )}
           {data && data.length > 0 && (
             <ul className="divide-y divide-border">
+              <li className="px-4 pt-1 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                Legacy Sessions
+              </li>
               {data.map((session) => (
                 <li key={session.sessionId} className="flex flex-col gap-1 px-4 py-2.5">
                   <div className="flex items-center gap-2 min-w-0">
