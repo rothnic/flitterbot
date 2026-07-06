@@ -11,6 +11,7 @@ function parseArgs(argv) {
     cwd: process.cwd(),
     timeoutMs: DEFAULT_TIMEOUT_MS,
     profile: "light",
+    workerHost: "local",
     keep: false,
     includeCancel: true,
   };
@@ -29,6 +30,15 @@ function parseArgs(argv) {
     } else if (arg === "--profile" && next) {
       opts.profile = next;
       i += 1;
+    } else if (arg === "--worker-host" && next) {
+      opts.workerHost = next;
+      i += 1;
+    } else if (arg === "--ssh-target" && next) {
+      opts.sshTarget = next;
+      i += 1;
+    } else if (arg === "--worker-cwd" && next) {
+      opts.workerCwd = next;
+      i += 1;
     } else if (arg === "--keep") {
       opts.keep = true;
     } else if (arg === "--skip-cancel") {
@@ -46,6 +56,10 @@ function parseArgs(argv) {
   }
 
   opts.cwd = path.resolve(opts.cwd);
+  if (!opts.workerCwd) opts.workerCwd = opts.cwd;
+  if (opts.workerHost !== "local" && !opts.sshTarget) {
+    throw new Error("--ssh-target is required when --worker-host is not local");
+  }
   return opts;
 }
 
@@ -59,12 +73,39 @@ requiring Pi provider auth for the coding worker.
 
 Options:
   --profile <id>       Codex worker profile to use. Default: light
+  --worker-host <id>   Worker host id to target. Default: local
+  --ssh-target <host>  SSH target for non-local worker host ids
+  --worker-cwd <path>  Worker cwd on the target host. Default: --cwd
   --timeout-ms <ms>    Completion timeout. Default: ${DEFAULT_TIMEOUT_MS}
   --skip-cancel        Skip active cancel proof
   --keep               Keep the temp HOME for inspection`);
 }
 
-function writeFreshConfig(home, cwd) {
+function writeFreshConfig(home, options) {
+  const cwd = options.cwd;
+  const workerHosts = [
+    {
+      id: "local",
+      displayName: "Local machine",
+      connectionMode: "local-stdio",
+      projectsRoot: cwd,
+      codexHome: process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+      maxConcurrentWorkers: 1,
+      capabilities: { role: "local" },
+    },
+  ];
+  if (options.workerHost !== "local") {
+    workerHosts.push({
+      id: options.workerHost,
+      displayName: options.workerHost,
+      connectionMode: "ssh-stdio",
+      connectionTarget: options.sshTarget,
+      projectsRoot: options.workerCwd,
+      codexHome: "~/.codex",
+      maxConcurrentWorkers: 1,
+      capabilities: { role: "remote-ssh" },
+    });
+  }
   const flitterbotDir = path.join(home, ".flitterbot");
   fs.mkdirSync(flitterbotDir, { recursive: true });
   const configPath = path.join(flitterbotDir, "config.json");
@@ -113,6 +154,7 @@ function writeFreshConfig(home, cwd) {
         skillPaths: [],
       },
     ],
+    workerHosts,
     piTransport: "auto",
     stallMinutes: 30,
     toolTimeoutMinutes: 30,
@@ -179,7 +221,7 @@ async function main() {
   process.env.HOME = tempHome;
   process.env.FLITTERBOT_HOME = tempHome;
   process.env.CODEX_HOME = process.env.CODEX_HOME || path.join(originalHome, ".codex");
-  const configPath = writeFreshConfig(tempHome, opts.cwd);
+  const configPath = writeFreshConfig(tempHome, opts);
 
   const [{ ControlSurfaceRuntime }, streams, messages, workers, { loadConfig }] = await Promise.all([
     import("../src/runtime.ts"),
@@ -206,7 +248,8 @@ async function main() {
 
     const launchResult = await executeTool(launch, {
       profile: opts.profile,
-      cwd: opts.cwd,
+      worker_host: opts.workerHost,
+      cwd: opts.workerCwd,
       prompt: "Reply exactly: flitterbot-e2e-ok",
       context: "This is the fresh runtime Codex worker control-plane proof.",
     });
@@ -265,7 +308,8 @@ async function main() {
     if (opts.includeCancel) {
       const cancelLaunchResult = await executeTool(launch, {
         profile: opts.profile,
-        cwd: opts.cwd,
+        worker_host: opts.workerHost,
+        cwd: opts.workerCwd,
         prompt:
           'Run this shell command first, then reply exactly: flitterbot-e2e-cancel-missed\n\nnode -e "setTimeout(() => {}, 60000)"',
         context: "This worker exists only to prove active cancellation through the runtime tool.",
@@ -311,6 +355,8 @@ async function main() {
       configPath,
       blackboardPath: runtime.config.blackboardPath,
       streamId: stream.id,
+      workerHost: opts.workerHost,
+      workerCwd: opts.workerCwd,
       workerSessionId: launched.workerSessionId,
       threadId: launched.threadId,
       initialTurnId: initialTurns[0].worker_turn_id,

@@ -706,8 +706,14 @@ export function parseWorkerHosts(raw: RawConfigJson): WorkerHostConfig[] {
     const projectsRoot = optionalNonEmptyString(host, "projectsRoot", `workerHosts[${index}]`);
     const codexHome = optionalNonEmptyString(host, "codexHome", `workerHosts[${index}]`);
     if (connectionTarget) parsed.connectionTarget = connectionTarget;
-    if (projectsRoot) parsed.projectsRoot = path.resolve(expandHome(projectsRoot));
-    if (codexHome) parsed.codexHome = path.resolve(expandHome(codexHome));
+    if (projectsRoot) {
+      parsed.projectsRoot =
+        connectionMode === "ssh-stdio" ? projectsRoot : path.resolve(expandHome(projectsRoot));
+    }
+    if (codexHome) {
+      parsed.codexHome =
+        connectionMode === "ssh-stdio" ? codexHome : path.resolve(expandHome(codexHome));
+    }
     if (connectionMode === "ssh-stdio" && !parsed.connectionTarget) {
       throw new Error(`Invalid workerHosts[${index}]: ssh-stdio requires connectionTarget`);
     }

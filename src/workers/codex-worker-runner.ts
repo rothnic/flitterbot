@@ -11,7 +11,7 @@ import {
   updateWorkerTurn,
   upsertWorkerHost,
 } from "../blackboard/query-workers.ts";
-import type { CodexWorkerProfile } from "../config/load-config.ts";
+import type { CodexWorkerProfile, WorkerHostConfig } from "../config/load-config.ts";
 import type { WorkerSessionRow } from "../contracts/index.ts";
 import {
   CodexAppServerClient,
@@ -27,6 +27,7 @@ export type StartCodexWorkerOptions = {
   streamId?: string | null;
   piSessionId?: string | null;
   codexCommand?: string;
+  workerHost?: WorkerHostConfig;
   timeoutMs?: number;
   profile?: CodexWorkerProfile;
   model?: string;
@@ -109,13 +110,68 @@ function upsertLocalHost(
   });
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function remoteShellValue(value: string): string {
+  if (value === "~") return '"$HOME"';
+  if (value.startsWith("~/")) return `"${"$HOME"}/${value.slice(2).replaceAll('"', '\\"')}"`;
+  return shellQuote(value);
+}
+
+function upsertConfiguredHost(db: BlackboardDatabase, host: WorkerHostConfig): void {
+  upsertWorkerHost(db, {
+    hostId: host.id,
+    displayName: host.displayName,
+    connectionMode: host.connectionMode,
+    connectionTarget: host.connectionTarget,
+    projectsRoot: host.projectsRoot,
+    codexHome: host.codexHome,
+    maxConcurrentWorkers: host.maxConcurrentWorkers,
+    status: "ready",
+    capabilities: host.capabilities,
+  });
+}
+
+function resolveClientTransport(
+  options: Pick<StartCodexWorkerOptions, "codexCommand" | "workerHost"> & { cwd: string },
+) {
+  const host = options.workerHost;
+  if (!host || host.connectionMode === "local-stdio") {
+    return {
+      codexCommand: options.codexCommand,
+      cwd: options.cwd,
+      env: host?.codexHome ? { ...process.env, CODEX_HOME: host.codexHome } : process.env,
+    };
+  }
+  if (host.connectionMode === "ssh-stdio") {
+    if (!host.connectionTarget)
+      throw new Error(`SSH worker host ${host.id} is missing connectionTarget`);
+    const codexCommand = options.codexCommand ?? "codex";
+    const envPrefix = host.codexHome
+      ? `export CODEX_HOME=${remoteShellValue(host.codexHome)}\n`
+      : "";
+    const script = `${envPrefix}cd ${shellQuote(options.cwd)}\n${codexCommand} app-server`;
+    return {
+      spawnCommand: "ssh",
+      spawnArgs: [host.connectionTarget, "sh", "-lc", shellQuote(script)],
+      cwd: undefined,
+      env: process.env,
+    };
+  }
+  throw new Error(
+    `Worker host mode ${host.connectionMode} is not supported for app-server turns yet`,
+  );
+}
+
 function createClient(
-  options: Pick<StartCodexWorkerOptions, "codexCommand"> & { cwd: string },
+  options: Pick<StartCodexWorkerOptions, "codexCommand" | "workerHost"> & { cwd: string },
   onEvent: (event: CodexAppServerEvent) => void,
 ): CodexAppServerClient {
+  const transport = resolveClientTransport(options);
   return new CodexAppServerClient({
-    codexCommand: options.codexCommand,
-    cwd: options.cwd,
+    ...transport,
     onEvent,
     onStderr: (chunk) => {
       onEvent({ method: "stderr", params: { chunk } });
@@ -198,25 +254,33 @@ export async function startCodexWorker(
   let workerSessionId: string | undefined;
   let workerTurnId: string | undefined;
 
-  upsertLocalHost(options.db, cwd, { codexCommand: options.codexCommand, profile, model });
+  const workerHostId = options.workerHost?.id ?? "local";
+  if (options.workerHost) {
+    upsertConfiguredHost(options.db, options.workerHost);
+  } else {
+    upsertLocalHost(options.db, cwd, { codexCommand: options.codexCommand, profile, model });
+  }
 
-  const client = createClient({ codexCommand: options.codexCommand, cwd }, (event) => {
-    if (!workerSessionId) return;
-    appendWorkerEvent(options.db, {
-      workerSessionId,
-      workerTurnId,
-      eventType: event.method,
-      eventSource: "codex-app-server",
-      payload: event,
-    });
-  });
+  const client = createClient(
+    { codexCommand: options.codexCommand, workerHost: options.workerHost, cwd },
+    (event) => {
+      if (!workerSessionId) return;
+      appendWorkerEvent(options.db, {
+        workerSessionId,
+        workerTurnId,
+        eventType: event.method,
+        eventSource: "codex-app-server",
+        payload: event,
+      });
+    },
+  );
 
   try {
     const init = await client.initialize();
     workerSessionId = insertWorkerSession(options.db, {
       runnerType: "codex_app_server",
       status: "starting",
-      hostId: "local",
+      hostId: workerHostId,
       streamId: options.streamId,
       piSessionId: options.piSessionId,
       cwd,
@@ -345,17 +409,24 @@ export async function startCodexWorkerFollowUp(
   const developerInstructions = buildDeveloperInstructions(options);
   let workerTurnId: string | undefined;
 
-  upsertLocalHost(options.db, cwd, { codexCommand: options.codexCommand, profile, model });
+  if (options.workerHost) {
+    upsertConfiguredHost(options.db, options.workerHost);
+  } else {
+    upsertLocalHost(options.db, cwd, { codexCommand: options.codexCommand, profile, model });
+  }
 
-  const client = createClient({ codexCommand: options.codexCommand, cwd }, (event) => {
-    appendWorkerEvent(options.db, {
-      workerSessionId: session.worker_session_id,
-      workerTurnId,
-      eventType: event.method,
-      eventSource: "codex-app-server",
-      payload: event,
-    });
-  });
+  const client = createClient(
+    { codexCommand: options.codexCommand, workerHost: options.workerHost, cwd },
+    (event) => {
+      appendWorkerEvent(options.db, {
+        workerSessionId: session.worker_session_id,
+        workerTurnId,
+        eventType: event.method,
+        eventSource: "codex-app-server",
+        payload: event,
+      });
+    },
+  );
 
   try {
     const init = await client.initialize();

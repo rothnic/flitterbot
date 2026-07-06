@@ -25,6 +25,12 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function remoteShellValue(value: string): string {
+  if (value === "~") return '"$HOME"';
+  if (value.startsWith("~/")) return `"${"$HOME"}/${value.slice(2).replaceAll('"', '\\"')}"`;
+  return shellQuote(value);
+}
+
 function runShell(script: string, options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): string {
   return execFileSync("sh", ["-lc", script], {
     cwd: options.cwd,
@@ -42,7 +48,7 @@ function runSshShell(target: string, script: string): string {
 }
 
 function checkScript(codexHome?: string): string {
-  const envPrefix = codexHome ? `export CODEX_HOME=${shellQuote(codexHome)}\n` : "";
+  const envPrefix = codexHome ? `export CODEX_HOME=${remoteShellValue(codexHome)}\n` : "";
   return `${envPrefix}command -v codex >/dev/null
 codex --version
 codex login status`;

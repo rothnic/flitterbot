@@ -52,7 +52,12 @@ import {
 } from "./blackboard/query-workers.ts";
 import { createQueryBlackboardTool } from "./blackboard/tool-query-blackboard.ts";
 import { killTmuxSession } from "./claude-sessions/tmux.ts";
-import { type FlitterbotConfig, loadConfig, type ThinkingLevel } from "./config/load-config.ts";
+import {
+  type FlitterbotConfig,
+  loadConfig,
+  type ThinkingLevel,
+  type WorkerHostConfig,
+} from "./config/load-config.ts";
 import { resolveModelEntry } from "./config/models.ts";
 import { persistModelsToConfigFile } from "./config/persist-models.ts";
 import type {
@@ -1755,8 +1760,23 @@ export class ControlSurfaceRuntime {
     });
   }
 
-  private resolveCodexWorkerCwd(streamId: string | undefined, cwd?: string): string {
+  private resolveCodexWorkerHost(hostId?: string): WorkerHostConfig | undefined {
+    if (!hostId?.trim()) return undefined;
+    const host = this.config.workerHosts.find((candidate) => candidate.id === hostId.trim());
+    if (!host) throw new Error(`Unknown worker host: ${hostId}`);
+    return host;
+  }
+
+  private resolveCodexWorkerCwd(
+    streamId: string | undefined,
+    cwd?: string,
+    workerHost?: WorkerHostConfig,
+  ): string {
     if (cwd?.trim()) return path.resolve(cwd.trim());
+    if (workerHost && workerHost.connectionMode !== "local-stdio") {
+      if (workerHost.projectsRoot) return workerHost.projectsRoot;
+      throw new Error(`Remote worker host ${workerHost.id} requires cwd or projectsRoot`);
+    }
     const stream = streamId ? getStreamById(this.blackboard, streamId) : null;
     return path.resolve(stream?.worktree_path ?? stream?.repo_path ?? this.config.projectsDir);
   }
@@ -1826,12 +1846,14 @@ export class ControlSurfaceRuntime {
     prompt: string;
     cwd?: string;
     context?: string;
+    workerHostId?: string;
   }): Promise<{
     workerSessionId: string;
     workerTurnId: string;
     threadId: string;
     turnId: string;
     profileId: string;
+    workerHostId: string;
     cwd: string;
     streamId?: string;
     streamName?: string;
@@ -1840,8 +1862,11 @@ export class ControlSurfaceRuntime {
     const stream = targetStreamId ? getStreamById(this.blackboard, targetStreamId) : null;
     if (targetStreamId && !stream) throw new Error(`Stream not found: ${targetStreamId}`);
     if (stream && stream.status !== "open") throw new Error(`Stream is closed: ${stream.name}`);
-    const cwd = this.resolveCodexWorkerCwd(targetStreamId, input.cwd);
-    if (!fs.existsSync(cwd)) throw new Error(`Codex worker cwd does not exist: ${cwd}`);
+    const workerHost = this.resolveCodexWorkerHost(input.workerHostId);
+    const cwd = this.resolveCodexWorkerCwd(targetStreamId, input.cwd, workerHost);
+    if (!workerHost || workerHost.connectionMode === "local-stdio") {
+      if (!fs.existsSync(cwd)) throw new Error(`Codex worker cwd does not exist: ${cwd}`);
+    }
     const profile = resolveCodexWorkerProfile(this.config, input.profileId);
     const managed = targetStreamId ? this.sessionManager.getByStream(targetStreamId) : undefined;
     const handle = await startCodexWorker({
@@ -1852,6 +1877,7 @@ export class ControlSurfaceRuntime {
       piSessionId: managed?.piSessionId,
       profile,
       context: input.context,
+      workerHost,
     });
     this.registerActiveCodexWorker({
       handle,
@@ -1864,6 +1890,7 @@ export class ControlSurfaceRuntime {
       threadId: handle.threadId,
       turnId: handle.turnId,
       profileId: profile.id,
+      workerHostId: workerHost?.id ?? "local",
       cwd,
       streamId: targetStreamId,
       streamName: stream?.name,
@@ -1889,12 +1916,14 @@ export class ControlSurfaceRuntime {
     if (!session) throw new Error(`Unknown worker session: ${input.workerSessionId}`);
     const profileId = input.profileId ?? parseWorkerProfileId(session);
     const profile = resolveCodexWorkerProfile(this.config, profileId);
+    const workerHost = this.resolveCodexWorkerHost(session.host_id ?? undefined);
     const handle = await startCodexWorkerFollowUp({
       db: this.blackboard,
       workerSessionId: input.workerSessionId,
       cwd: session.cwd,
       prompt: input.prompt,
       profile,
+      workerHost,
     });
     const stream = session.stream_id ? getStreamById(this.blackboard, session.stream_id) : null;
     this.registerActiveCodexWorker({
@@ -2474,6 +2503,11 @@ export class ControlSurfaceRuntime {
               description:
                 "Optional stream id. Defaults to the current orchestrator stream; use only for deliberate cross-stream launch.",
             },
+            worker_host: {
+              type: "string",
+              description:
+                "Optional worker host id from config.workerHosts, such as local or vps-gw. Defaults to local.",
+            },
             context: {
               type: "string",
               description: "Optional extra context injected as Codex developer instructions.",
@@ -2489,6 +2523,7 @@ export class ControlSurfaceRuntime {
               profile?: string;
               cwd?: string;
               stream_id?: string;
+              worker_host?: string;
               context?: string;
             };
             const result = await this.launchCodexWorkerTask({
@@ -2497,6 +2532,7 @@ export class ControlSurfaceRuntime {
               prompt: parsed.prompt,
               cwd: parsed.cwd,
               context: parsed.context,
+              workerHostId: parsed.worker_host,
             });
             return {
               content: [

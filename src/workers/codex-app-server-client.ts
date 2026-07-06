@@ -27,6 +27,8 @@ export type CodexAppServerEvent = {
 
 export type CodexAppServerClientOptions = {
   codexCommand?: string;
+  spawnCommand?: string;
+  spawnArgs?: string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   onEvent?: (event: CodexAppServerEvent) => void;
@@ -72,11 +74,15 @@ export class CodexAppServerClient {
   constructor(options: CodexAppServerClientOptions = {}) {
     this.onEvent = options.onEvent;
     this.onStderr = options.onStderr;
-    this.child = spawn(options.codexCommand ?? "codex", ["app-server"], {
-      cwd: options.cwd,
-      env: options.env ?? process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    this.child = spawn(
+      options.spawnCommand ?? options.codexCommand ?? "codex",
+      options.spawnArgs ?? ["app-server"],
+      {
+        cwd: options.cwd,
+        env: options.env ?? process.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
     this.rl = createInterface({ input: this.child.stdout });
     this.rl.on("line", (line) => this.handleLine(line));
     this.child.stderr.on("data", (chunk: Buffer) => {
@@ -138,7 +144,6 @@ export class CodexAppServerClient {
       baseInstructions: params.baseInstructions ?? null,
       developerInstructions: params.developerInstructions ?? null,
       personality: params.personality ?? "pragmatic",
-      threadSource: "appServer",
     })) as CodexThreadStartResponse;
   }
 

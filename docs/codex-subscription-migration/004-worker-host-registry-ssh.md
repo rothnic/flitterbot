@@ -11,6 +11,8 @@ multi-computer task routing.
 - Add `workerHosts` to Flitterbot config.
 - Sync configured hosts into `worker_hosts` on runtime startup.
 - Support local and SSH stdio host readiness checks.
+- Launch Codex app-server workers through SSH stdio for configured SSH hosts.
+- Resume follow-up turns on the same recorded worker host.
 - Record host status, heartbeat time, Codex version, auth status, projects
   root, credential location, and capabilities in the blackboard.
 - Keep the registry compatible with future Unix-socket and authenticated
@@ -19,7 +21,6 @@ multi-computer task routing.
 ## Out Of Scope
 
 - Scheduling work across multiple hosts.
-- Running a full Codex app-server turn over SSH stdio.
 - Long-lived remote WebSocket daemons.
 - Copying Codex credentials between machines.
 
@@ -69,6 +70,7 @@ Example SSH host:
 pnpm run doctor:codex-worker-hosts -- --fresh-local --cwd "$PWD"
 pnpm run doctor:codex-worker-hosts
 pnpm run doctor:codex-worker-hosts -- --allow-unreachable
+pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000 --skip-cancel
 sqlite3 ~/.flitterbot/blackboard.db "SELECT host_id, connection_mode, status, last_heartbeat_at FROM worker_hosts;"
 pnpm run audit
 ```
@@ -81,14 +83,18 @@ pnpm run audit
 - `pnpm run doctor:codex-worker-hosts` checks local `codex --version` and
   `codex login status`.
 - SSH hosts use `ssh <connectionTarget> sh -lc '<codex checks>'`.
+- `launch_codex_worker` accepts `worker_host` and can start a Codex app-server
+  worker through SSH stdio.
+- `send_codex_worker_followup` resumes the same stored Codex thread on the
+  worker session's recorded host.
 - Unreachable hosts are marked `unreachable`; ready hosts are marked `ready`.
 - `pnpm run audit` passes.
 
 ## Future Extension
 
-The next remote execution slice should reuse this registry to choose a host,
-start `codex app-server` through SSH stdio, persist the selected `host_id`, and
-resume stored `thread_id` values on the same host after controller restart.
+The next remote execution slice should add scheduling policy: host selection by
+capacity/capability, repo/worktree mapping, and restart recovery that reconnects
+to the recorded host before resuming stored `thread_id` values.
 
 ## Verified Evidence
 
@@ -98,3 +104,8 @@ resume stored `thread_id` values on the same host after controller restart.
   against a temporary `HOME` and fresh blackboard.
 - The command synced the configured local host into `worker_hosts`.
 - The command marked `local` as `ready` and detected `codex-cli 0.142.5`.
+- `pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000 --skip-cancel`
+  passed against `vps-gw`.
+- The SSH run started Codex app-server through SSH stdio, completed launch and
+  follow-up turns, wrote 42 worker events, and routed two worker completion
+  messages back into the local stream.

@@ -57,6 +57,12 @@ Useful debug mode:
 pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --keep
 ```
 
+Remote SSH worker proof:
+
+```bash
+pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --skip-cancel
+```
+
 The command prints the temp home, config path, blackboard path, stream id,
 Codex thread id, worker session id, worker turn ids, event count, routed message
 count, and cancel proof.
