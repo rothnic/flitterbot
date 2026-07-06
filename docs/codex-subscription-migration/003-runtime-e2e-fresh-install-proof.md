@@ -48,6 +48,7 @@ app-server worker output without requiring Claude Code.
 
 ```bash
 pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD"
+pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD"
 pnpm run audit
 ```
 
@@ -66,6 +67,19 @@ pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --worker-host vps-gw --s
 The command prints the temp home, config path, blackboard path, stream id,
 Codex thread id, worker session id, worker turn ids, event count, routed message
 count, and cancel proof.
+
+Live Pi orchestrator proof:
+
+```bash
+pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD"
+```
+
+This creates a fresh temporary install, copies an existing Pi `openai-codex`
+auth file into the temporary Flitterbot control-surface auth path for the run,
+creates a real stream orchestrator, sends a user prompt through the Pi queue,
+and verifies the orchestrator calls `launch_codex_worker`. If Pi
+`openai-codex` auth is absent, use `--allow-missing-pi-auth` to record the
+auth gate without failing local report-only validation.
 
 ## Product Note
 
@@ -93,3 +107,13 @@ classification should use an OpenAI-compatible proxy such as 9router.
 - The completed worker wrote 96 `worker_events` rows and two routed stream
   messages.
 - `pnpm run audit` passed.
+
+2026-07-06 live Pi orchestrator proof harness:
+
+- Added `pnpm run e2e:live-pi-orchestrator-codex-worker`.
+- `pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth`
+  completed as a skipped report because `~/.pi/agent/auth.json` does not
+  contain `openai-codex` auth on this machine.
+- The remaining live proof is to complete `pnpm exec pi` → `/login` →
+  `ChatGPT Plus/Pro (Codex)`, then rerun the same E2E without
+  `--allow-missing-pi-auth`.
