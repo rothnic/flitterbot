@@ -312,3 +312,10 @@ Manual proof:
 5. Worker host registry and SSH-backed app-server connection.
 6. WebSocket-auth worker mode for deliberate always-on hosts.
 7. Neutral terminology cleanup after behavior is proven.
+
+## Goal Documents
+
+- [001 Local Codex App-Server Runner](./001-local-codex-app-server-runner.md)
+- [002 Orchestrator Codex Worker Control Plane](./002-orchestrator-codex-worker-control-plane.md)
+- [003 Runtime E2E Fresh Install Proof](./003-runtime-e2e-fresh-install-proof.md)
+- [004 Worker Host Registry And SSH Readiness](./004-worker-host-registry-ssh.md)

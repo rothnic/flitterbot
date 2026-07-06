@@ -542,6 +542,19 @@ async function bootstrapConfig() {
       skillPaths: [],
     },
   ];
+  const DEFAULT_WORKER_HOSTS = [
+    {
+      id: "local",
+      displayName: "Local machine",
+      connectionMode: "local-stdio",
+      projectsRoot: "~/development",
+      codexHome: "~/.codex",
+      maxConcurrentWorkers: 1,
+      capabilities: {
+        role: "local",
+      },
+    },
+  ];
   const DEFAULT_AGENT_FIRST_MESSAGE =
     "Load up /skill:tasks /skill:notes and run ls on the project repositories directory. Then wait for the user";
   const DEFAULT_NEW_STREAM_FIRST_MESSAGE_FOOTER =
@@ -556,6 +569,7 @@ async function bootstrapConfig() {
     classifier: DEFAULT_CLASSIFIER,
     defaultCodexWorkerProfile: DEFAULT_CODEX_WORKER_PROFILES[0].id,
     codexWorkerProfiles: DEFAULT_CODEX_WORKER_PROFILES,
+    workerHosts: DEFAULT_WORKER_HOSTS,
     piTransport: "websocket-cached",
     stallMinutes: 15,
     toolTimeoutMinutes: 4,

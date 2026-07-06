@@ -105,6 +105,7 @@ import {
   startCodexWorker,
   startCodexWorkerFollowUp,
 } from "./workers/codex-worker-runner.ts";
+import { syncConfiguredWorkerHosts } from "./workers/worker-hosts.ts";
 import { type WebSocketClient, WebSocketHub } from "./ws/hub.ts";
 
 // ponytail: prefer the SDK's tool definition type here instead of maintaining a local mirror.
@@ -175,6 +176,7 @@ export class ControlSurfaceRuntime {
       this.whatsappStatusCache = { status: "disabled", managedByControlSurface: true };
     }
     this.blackboard = openBlackboard(config.blackboardPath);
+    syncConfiguredWorkerHosts(this.blackboard, config);
     this.wsHub = new WebSocketHub(this.handleWebSocketMessage.bind(this));
     this.sessionManager = new PiSessionManager(
       config,

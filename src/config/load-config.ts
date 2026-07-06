@@ -57,6 +57,17 @@ export type CodexWorkerProfile = {
   skillPaths: string[];
 };
 
+export type WorkerHostConfig = {
+  id: string;
+  displayName: string;
+  connectionMode: "local-stdio" | "ssh-stdio" | "unix-socket" | "websocket-auth";
+  connectionTarget?: string;
+  projectsRoot?: string;
+  codexHome?: string;
+  maxConcurrentWorkers: number;
+  capabilities: Record<string, unknown>;
+};
+
 type RawConfigJson = {
   controlSurfaceHost?: unknown;
   controlSurfacePort?: unknown;
@@ -68,6 +79,7 @@ type RawConfigJson = {
   classifier?: unknown;
   defaultCodexWorkerProfile?: unknown;
   codexWorkerProfiles?: unknown;
+  workerHosts?: unknown;
   piTransport?: unknown;
   stallMinutes?: unknown;
   toolTimeoutMinutes?: unknown;
@@ -105,6 +117,7 @@ const ACCEPTED_CONFIG_KEYS = [
   "classifier",
   "defaultCodexWorkerProfile",
   "codexWorkerProfiles",
+  "workerHosts",
   "piTransport",
   "stallMinutes",
   "toolTimeoutMinutes",
@@ -150,11 +163,22 @@ const ACCEPTED_CODEX_WORKER_PROFILE_KEYS = [
   "skillNames",
   "skillPaths",
 ] as const;
+const ACCEPTED_WORKER_HOST_KEYS = [
+  "id",
+  "displayName",
+  "connectionMode",
+  "connectionTarget",
+  "projectsRoot",
+  "codexHome",
+  "maxConcurrentWorkers",
+  "capabilities",
+] as const;
 
 const ACCEPTED_CONFIG_KEY_SET = new Set<string>(ACCEPTED_CONFIG_KEYS);
 const ACCEPTED_MODEL_CONFIG_KEY_SET = new Set<string>(ACCEPTED_MODEL_CONFIG_KEYS);
 const ACCEPTED_CLASSIFIER_CONFIG_KEY_SET = new Set<string>(ACCEPTED_CLASSIFIER_CONFIG_KEYS);
 const ACCEPTED_CODEX_WORKER_PROFILE_KEY_SET = new Set<string>(ACCEPTED_CODEX_WORKER_PROFILE_KEYS);
+const ACCEPTED_WORKER_HOST_KEY_SET = new Set<string>(ACCEPTED_WORKER_HOST_KEYS);
 
 export type FlitterbotConfig = {
   controlSurfaceHost: string;
@@ -166,6 +190,7 @@ export type FlitterbotConfig = {
   classifier: ClassifierConfig;
   defaultCodexWorkerProfile: string;
   codexWorkerProfiles: CodexWorkerProfile[];
+  workerHosts: WorkerHostConfig[];
   piTransport: PiTransport;
   stallMinutes: number;
   toolTimeoutMinutes: number;
@@ -235,6 +260,20 @@ export const DEFAULT_CODEX_WORKER_PROFILES: CodexWorkerProfile[] = [
   },
 ];
 
+export const DEFAULT_WORKER_HOSTS: WorkerHostConfig[] = [
+  {
+    id: "local",
+    displayName: "Local machine",
+    connectionMode: "local-stdio",
+    projectsRoot: "~/workspace",
+    codexHome: "~/.codex",
+    maxConcurrentWorkers: 1,
+    capabilities: {
+      role: "local",
+    },
+  },
+];
+
 function expandHome(value: string): string {
   if (!value) return value;
   if (value === "~") return HOME;
@@ -292,6 +331,17 @@ function collectUnknownConfigKeys(raw: Record<string, unknown>): string[] {
       for (const key of Object.keys(entry)) {
         if (!ACCEPTED_CODEX_WORKER_PROFILE_KEY_SET.has(key)) {
           unknownKeys.push(`"codexWorkerProfiles[${index}].${key}"`);
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(raw.workerHosts)) {
+    for (const [index, entry] of raw.workerHosts.entries()) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      for (const key of Object.keys(entry)) {
+        if (!ACCEPTED_WORKER_HOST_KEY_SET.has(key)) {
+          unknownKeys.push(`"workerHosts[${index}].${key}"`);
         }
       }
     }
@@ -585,6 +635,86 @@ export function parseCodexWorkerProfiles(raw: RawConfigJson): {
   };
 }
 
+function isWorkerHostConnectionMode(value: unknown): value is WorkerHostConfig["connectionMode"] {
+  return (
+    value === "local-stdio" ||
+    value === "ssh-stdio" ||
+    value === "unix-socket" ||
+    value === "websocket-auth"
+  );
+}
+
+export function parseWorkerHosts(raw: RawConfigJson): WorkerHostConfig[] {
+  const input = raw.workerHosts ?? DEFAULT_WORKER_HOSTS;
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error("Invalid workerHosts: expected non-empty array");
+  }
+
+  const seen = new Set<string>();
+  return input.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`Invalid workerHosts[${index}]: expected object`);
+    }
+    const host = entry as Record<string, unknown>;
+    const id = host.id;
+    const displayName = host.displayName;
+    const connectionMode = host.connectionMode;
+    if (typeof id !== "string" || !id.trim()) {
+      throw new Error(`Invalid workerHosts[${index}].id: expected non-empty string`);
+    }
+    const trimmedId = id.trim();
+    if (seen.has(trimmedId)) throw new Error(`Duplicate worker host id: ${trimmedId}`);
+    seen.add(trimmedId);
+    if (typeof displayName !== "string" || !displayName.trim()) {
+      throw new Error(`Invalid workerHosts[${index}].displayName: expected non-empty string`);
+    }
+    if (!isWorkerHostConnectionMode(connectionMode)) {
+      throw new Error(
+        "Invalid workerHosts[" +
+          index +
+          "].connectionMode: expected local-stdio, ssh-stdio, unix-socket, or websocket-auth",
+      );
+    }
+
+    const maxConcurrentWorkers = host.maxConcurrentWorkers ?? 1;
+    if (
+      typeof maxConcurrentWorkers !== "number" ||
+      !Number.isFinite(maxConcurrentWorkers) ||
+      maxConcurrentWorkers <= 0
+    ) {
+      throw new Error(
+        `Invalid workerHosts[${index}].maxConcurrentWorkers: expected positive number`,
+      );
+    }
+    const capabilities = host.capabilities ?? {};
+    if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
+      throw new Error(`Invalid workerHosts[${index}].capabilities: expected object`);
+    }
+
+    const parsed: WorkerHostConfig = {
+      id: trimmedId,
+      displayName: displayName.trim(),
+      connectionMode,
+      maxConcurrentWorkers: Math.trunc(maxConcurrentWorkers),
+      capabilities: capabilities as Record<string, unknown>,
+    };
+    const connectionTarget = optionalNonEmptyString(
+      host,
+      "connectionTarget",
+      `workerHosts[${index}]`,
+    );
+    const projectsRoot = optionalNonEmptyString(host, "projectsRoot", `workerHosts[${index}]`);
+    const codexHome = optionalNonEmptyString(host, "codexHome", `workerHosts[${index}]`);
+    if (connectionTarget) parsed.connectionTarget = connectionTarget;
+    if (projectsRoot) parsed.projectsRoot = path.resolve(expandHome(projectsRoot));
+    if (codexHome) parsed.codexHome = path.resolve(expandHome(codexHome));
+    if (connectionMode === "ssh-stdio" && !parsed.connectionTarget) {
+      throw new Error(`Invalid workerHosts[${index}]: ssh-stdio requires connectionTarget`);
+    }
+    return parsed;
+  });
+}
+
 function parseModels(raw: RawConfigJson): ModelConfigEntry[] {
   const input = requireConfigArray(raw, "models");
   if (input.length === 0) throw new Error("Config key models must contain at least one model");
@@ -669,6 +799,7 @@ export function loadConfig(): FlitterbotConfig {
   const models = parseModels(raw);
   const defaultModel = resolveDefaultModel(raw, models);
   const workerProfiles = parseCodexWorkerProfiles(raw);
+  const workerHosts = parseWorkerHosts(raw);
   const config: FlitterbotConfig = {
     controlSurfaceHost: requireConfigString(raw, "controlSurfaceHost"),
     controlSurfacePort: requireConfigNumber(raw, "controlSurfacePort"),
@@ -679,6 +810,7 @@ export function loadConfig(): FlitterbotConfig {
     classifier: parseClassifierConfig(raw),
     defaultCodexWorkerProfile: workerProfiles.defaultCodexWorkerProfile,
     codexWorkerProfiles: workerProfiles.codexWorkerProfiles,
+    workerHosts,
     piTransport: requirePiTransport(raw),
     stallMinutes: requireConfigNumber(raw, "stallMinutes"),
     toolTimeoutMinutes: requireConfigNumber(raw, "toolTimeoutMinutes"),

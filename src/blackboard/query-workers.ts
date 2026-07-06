@@ -75,6 +75,39 @@ export function getWorkerHost(db: BlackboardDatabase, hostId: string): WorkerHos
   return db.get<WorkerHostRow>("SELECT * FROM worker_hosts WHERE host_id = ?", hostId) ?? null;
 }
 
+export function listWorkerHosts(db: BlackboardDatabase): WorkerHostRow[] {
+  return db.all<WorkerHostRow>(
+    `SELECT *
+     FROM worker_hosts
+     ORDER BY status = 'ready' DESC, host_id ASC`,
+  );
+}
+
+export function updateWorkerHostStatus(
+  db: BlackboardDatabase,
+  hostId: string,
+  input: { status: WorkerHostStatus; capabilities?: unknown },
+): WorkerHostRow {
+  const current = getWorkerHost(db, hostId);
+  if (!current) throw new Error(`Unknown worker host: ${hostId}`);
+  const updatedAt = nowIso();
+  db.prepare(
+    `UPDATE worker_hosts
+     SET status = ?,
+         last_heartbeat_at = ?,
+         capabilities_json = ?,
+         updated_at = ?
+     WHERE host_id = ?`,
+  ).run(
+    input.status,
+    updatedAt,
+    input.capabilities === undefined ? current.capabilities_json : encodeJson(input.capabilities),
+    updatedAt,
+    hostId,
+  );
+  return getWorkerHost(db, hostId)!;
+}
+
 export type InsertWorkerSessionInput = {
   workerSessionId?: string;
   runnerType: WorkerRunnerType;
