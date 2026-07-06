@@ -54,6 +54,11 @@ entries do not shadow populated fallback files. Coding worker execution uses
 real Codex CLI/SDK/app-server auth. Add Anthropic models and `ANTHROPIC_API_KEY`
 only for explicit legacy Claude orchestration.
 
+Run `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"` for one JSON
+summary of the Codex worker, classifier, install-default, host-scheduler, UI,
+and Pi auth readiness checks. After Pi `/login`, add `--strict
+--full-local-worker` to require the full live subscription path.
+
 Runtime tuning: edit `~/.flitterbot/config.json` — keys are self-describing. The user-facing prompt knobs are:
 
 - `defaultAgentFirstMessage` — first instruction queued when the default agent starts.

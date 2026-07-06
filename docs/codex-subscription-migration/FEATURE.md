@@ -261,6 +261,7 @@ Run:
 
 ```bash
 pnpm run audit
+pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"
 pnpm --dir web run build
 pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --timeout-ms 180000
 pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth
@@ -325,6 +326,11 @@ Verified on 2026-07-06:
 - `pnpm run e2e:classifier-provider-configs` proves classifier config/auth
   readiness reporting for `disabled`, `groq`, `openai`, `openai-compatible`,
   and `pi`.
+- `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"` reports all
+  repeatable Codex-subscription proof gates in one JSON summary and points to
+  the post-login strict mode needed for the final live Pi subscription proof.
+  Report mode does not run the live Pi harness unless `--live-pi-harness` is
+  passed.
 
 Manual proof:
 

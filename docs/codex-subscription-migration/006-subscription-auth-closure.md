@@ -43,6 +43,7 @@ current state.
 ## Validation
 
 ```bash
+pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"
 pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
 pnpm run e2e:classifier-provider-configs
 pnpm run audit
@@ -53,6 +54,13 @@ ready:
 
 ```bash
 pnpm run doctor:codex-subscription-auth
+```
+
+Run the aggregate readiness doctor in strict mode after Pi provider auth is
+present:
+
+```bash
+pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --strict --full-local-worker
 ```
 
 ## Verified Evidence
@@ -85,6 +93,12 @@ pnpm run doctor:codex-subscription-auth
   readiness reporting for classifier providers `disabled`, `groq`, `openai`,
   `openai-compatible`, and `pi`, including missing-key, API-key-present,
   9router-style base URL, and Pi provider-auth-present/missing cases.
+- `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"` passed in
+  report mode and produced one JSON readiness summary for auth, classifier
+  provider configs, Codex-first install defaults, host scheduler, worker UI
+  visibility, and Pi provider-auth readiness. Report mode requires Codex worker
+  auth but does not run the live Pi harness unless `--live-pi-harness` is
+  passed.
 
 ## Remaining Operator Action
 
