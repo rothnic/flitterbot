@@ -42,7 +42,8 @@ SCHEMA — every table, column, type, and key:
 streams
   id TEXT PK, name TEXT, type TEXT ('work'|'defaultStream'), repo_path TEXT, worktree_path TEXT,
   base_branch TEXT (branch this stream was forked from; required for close_stream merge mode),
-  pinned BOOLEAN, status TEXT ('open'|'closed'), created_at DATETIME, closed_at TEXT
+  pinned BOOLEAN, status TEXT ('open'|'closed'), stream_user TEXT,
+  created_at DATETIME, closed_at TEXT
 
 sessions
   session_id TEXT PK (NOT "id"), tmux_session TEXT, cwd TEXT, project TEXT,
@@ -62,7 +63,42 @@ pi_sessions
   started_at DATETIME, last_prompt_at DATETIME, last_event_at DATETIME,
   ended_at DATETIME, end_reason TEXT,
   stream_id TEXT FK→streams.id,
-  last_datetime_reported_at DATETIME
+  last_datetime_reported_at DATETIME, session_user TEXT
+
+worker_hosts
+  host_id TEXT PK, display_name TEXT,
+  connection_mode TEXT ('local-stdio'|'ssh-stdio'|'unix-socket'|'websocket-auth'),
+  connection_target TEXT, projects_root TEXT, codex_home TEXT,
+  max_concurrent_workers INTEGER,
+  status TEXT ('unknown'|'ready'|'busy'|'unreachable'|'disabled'),
+  last_heartbeat_at DATETIME, capabilities_json TEXT,
+  created_at DATETIME, updated_at DATETIME
+
+worker_sessions
+  worker_session_id TEXT PK,
+  runner_type TEXT ('codex_app_server'|'codex_exec'|'claude_tmux'|'pi'),
+  status TEXT ('starting'|'running'|'waiting_for_user'|'idle'|'completed'|'failed'|'canceled'|'unreachable'),
+  host_id TEXT FK→worker_hosts.host_id,
+  stream_id TEXT FK→streams.id,
+  pi_session_id TEXT FK→pi_sessions.pi_session_id,
+  legacy_session_id TEXT, cwd TEXT, repo_path TEXT, worktree_path TEXT, branch TEXT,
+  model_provider TEXT, model_id TEXT,
+  external_thread_id TEXT, external_session_id TEXT,
+  approval_policy TEXT, sandbox_policy TEXT,
+  started_at DATETIME, last_event_at DATETIME, completed_at DATETIME,
+  error_message TEXT, metadata_json TEXT
+
+worker_turns
+  worker_turn_id TEXT PK, worker_session_id TEXT FK→worker_sessions.worker_session_id,
+  external_turn_id TEXT, client_message_id TEXT,
+  status TEXT ('queued'|'running'|'waiting_for_user'|'completed'|'failed'|'canceled'),
+  prompt TEXT, final_output TEXT, started_at DATETIME, completed_at DATETIME,
+  error_message TEXT, metadata_json TEXT
+
+worker_events
+  worker_event_id TEXT PK, worker_session_id TEXT FK→worker_sessions.worker_session_id,
+  worker_turn_id TEXT FK→worker_turns.worker_turn_id,
+  event_type TEXT, event_source TEXT, payload_json TEXT, created_at DATETIME
 
 pending_actions
   action_id TEXT PK, channel TEXT, context_ref TEXT, kind TEXT,
@@ -97,6 +133,10 @@ KEY RELATIONSHIPS:
   pi_sessions.stream_id → streams.id
   messages.stream_id → streams.id
   messages.pi_session_id → pi_sessions.pi_session_id
+  worker_sessions.host_id → worker_hosts.host_id
+  worker_sessions.stream_id → streams.id
+  worker_turns.worker_session_id → worker_sessions.worker_session_id
+  worker_events.worker_session_id → worker_sessions.worker_session_id
 
 COMMON GOTCHAS:
   - sessions PK is "session_id", NOT "id"

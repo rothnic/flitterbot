@@ -70,11 +70,6 @@ export async function createFlitterbotAgent(
 
   const promptRef = { value: "" };
 
-  const authStorage = createPiAuthStorage(config.controlSurfaceAgentDir);
-  const agentDir = config.controlSurfaceAgentDir;
-  const modelRegistry = createPiModelRegistry(authStorage, agentDir);
-  const settingsManager = SettingsManager.inMemory();
-  settingsManager.setTransport(config.piTransport);
   const builtInSkillPaths = [
     path.join(HOME, ".claude", "skills"),
     path.join(HOME, ".agents", "skills"),
@@ -125,6 +120,14 @@ export async function createFlitterbotAgent(
   const effectiveThinkingLevel: ThinkingLevel | undefined = modelEntry
     ? (modelEntry.thinkingLevel ?? config.defaultThinkingLevel)
     : undefined;
+  const agentDir = config.controlSurfaceAgentDir;
+  const authStorage = createPiAuthStorage(
+    agentDir,
+    modelEntry?.provider ?? resolveModelEntry(config).provider,
+  );
+  const modelRegistry = createPiModelRegistry(authStorage, agentDir);
+  const settingsManager = SettingsManager.inMemory();
+  settingsManager.setTransport(config.piTransport);
 
   const runtimeFactory: CreateAgentSessionRuntimeFactory = async (factoryOpts) => {
     const factoryPiSessionId = factoryOpts.sessionManager.getSessionId();

@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import type { ChatTimelineItem, DownstreamSessionItem } from "~/lib/types";
+import type { ChatTimelineItem, DownstreamSessionItem, WorkerSessionItem } from "~/lib/types";
 
 const BASE_URL = process.env.VITE_FLITTERBOT_BASE_URL || "http://127.0.0.1:18820";
 const TOKEN = process.env.VITE_FLITTERBOT_TOKEN || "";
@@ -85,6 +85,19 @@ export const fetchDownstreamSessions = createServerFn({ method: "GET" })
       return res.items;
     } catch (err) {
       console.error("fetchDownstreamSessions failed (piSessionId=%s):", data.piSessionId, err);
+      throw err;
+    }
+  });
+
+export const fetchWorkerSessions = createServerFn({ method: "GET" })
+  .inputValidator((input: { streamId: string }) => input)
+  .handler(async ({ data }): Promise<WorkerSessionItem[]> => {
+    const path = `/api/streams/${encodeURIComponent(data.streamId)}/workers`;
+    try {
+      const res = (await streamsRequest(path)) as { items: WorkerSessionItem[] };
+      return res.items;
+    } catch (err) {
+      console.error("fetchWorkerSessions failed (streamId=%s):", data.streamId, err);
       throw err;
     }
   });

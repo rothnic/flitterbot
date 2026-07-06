@@ -47,7 +47,7 @@ export const Route = createRootRouteWithContext<{
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       ...seo({
         title: "Flitterbot",
-        description: "Orchestration layer for Claude Code.",
+        description: "Orchestration runtime for Pi-managed streams and coding workers.",
       }),
     ],
     links: [

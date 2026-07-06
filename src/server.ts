@@ -7,6 +7,7 @@ process.on("warning", (warning) => {
 });
 
 import http from "node:http";
+import { pathToFileURL } from "node:url";
 import {
   CONTROL_SURFACE_ENDPOINTS,
   type HookRouteEventName,
@@ -29,7 +30,14 @@ import {
   handleBrowserUserConfigGetRoute,
   handleBrowserUserConfigPutRoute,
 } from "./routes/browser-user-config.ts";
+import { handleBrowserWorkerSessionsRoute } from "./routes/browser-worker-sessions.ts";
 import { handleCloseStreamNoopRoute } from "./routes/close-stream.ts";
+import {
+  handleCodexWorkerCancelRoute,
+  handleCodexWorkerFollowUpRoute,
+  handleCodexWorkerLaunchRoute,
+  handleCodexWorkerStatusRoute,
+} from "./routes/codex-workers.ts";
 import { handleCompactPiSessionRoute } from "./routes/compact-pi-session.ts";
 import { handleCreateStreamRoute } from "./routes/create-stream.ts";
 import { handleCronTickRoute } from "./routes/cron-tick.ts";
@@ -54,26 +62,28 @@ import { errorDetail, errorMessage, formatStartupFailure } from "./startup-error
 
 let runtime: ControlSurfaceRuntime | undefined;
 
-process.on("SIGTERM", () => {
-  void runtime?.stop("sigterm").finally(() => process.exit(0));
-  if (!runtime) process.exit(0);
-});
-process.on("SIGINT", () => {
-  void runtime?.stop("sigint").finally(() => process.exit(0));
-  if (!runtime) process.exit(0);
-});
-process.on("uncaughtException", (error) => {
-  console.error(errorDetail(error));
-  void runtime?.stop("uncaught_exception", true).finally(() => process.exit(1));
-  if (!runtime) process.exit(1);
-});
-process.on("unhandledRejection", (error) => {
-  console.error(errorDetail(error));
-  void runtime?.stop("unhandled_rejection", true).finally(() => process.exit(1));
-  if (!runtime) process.exit(1);
-});
+function installProcessHandlers(): void {
+  process.on("SIGTERM", () => {
+    void runtime?.stop("sigterm").finally(() => process.exit(0));
+    if (!runtime) process.exit(0);
+  });
+  process.on("SIGINT", () => {
+    void runtime?.stop("sigint").finally(() => process.exit(0));
+    if (!runtime) process.exit(0);
+  });
+  process.on("uncaughtException", (error) => {
+    console.error(errorDetail(error));
+    void runtime?.stop("uncaught_exception", true).finally(() => process.exit(1));
+    if (!runtime) process.exit(1);
+  });
+  process.on("unhandledRejection", (error) => {
+    console.error(errorDetail(error));
+    void runtime?.stop("unhandled_rejection", true).finally(() => process.exit(1));
+    if (!runtime) process.exit(1);
+  });
+}
 
-try {
+async function main(): Promise<void> {
   runtime = new ControlSurfaceRuntime();
   const activeRuntime = runtime;
   const server = createServer(activeRuntime);
@@ -89,15 +99,22 @@ try {
       );
     },
   );
-} catch (error) {
-  console.error(formatStartupFailure(error));
-  await runtime?.stop("startup_failure", true).catch((stopError) => {
-    console.error(`Failed to stop runtime after startup failure: ${errorDetail(stopError)}`);
-  });
-  process.exit(1);
 }
 
-function createServer(runtime: ControlSurfaceRuntime): http.Server {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  installProcessHandlers();
+  try {
+    await main();
+  } catch (error) {
+    console.error(formatStartupFailure(error));
+    await runtime?.stop("startup_failure", true).catch((stopError) => {
+      console.error(`Failed to stop runtime after startup failure: ${errorDetail(stopError)}`);
+    });
+    process.exit(1);
+  }
+}
+
+export function createServer(runtime: ControlSurfaceRuntime): http.Server {
   const server = http.createServer(async (req, res) => {
     applyCorsHeaders(res);
     if ((req.method ?? "GET") === "OPTIONS") {
@@ -198,6 +215,38 @@ async function routeRequest(
   }
   if (method === "POST" && pathname === "/api/models/pin") {
     return handleBrowserModelsPinRoute(runtime, req, res);
+  }
+  if (method === "POST" && pathname === "/api/workers") {
+    return handleCodexWorkerLaunchRoute(runtime, req, res);
+  }
+  if (
+    method === "GET" &&
+    segments[0] === "api" &&
+    segments[1] === "workers" &&
+    segments[2] &&
+    !segments[3]
+  ) {
+    return handleCodexWorkerStatusRoute(runtime, req, res, decodeURIComponent(segments[2]));
+  }
+  if (
+    method === "POST" &&
+    segments[0] === "api" &&
+    segments[1] === "workers" &&
+    segments[2] &&
+    segments[3] === "followup" &&
+    !segments[4]
+  ) {
+    return handleCodexWorkerFollowUpRoute(runtime, req, res, decodeURIComponent(segments[2]));
+  }
+  if (
+    method === "POST" &&
+    segments[0] === "api" &&
+    segments[1] === "workers" &&
+    segments[2] &&
+    segments[3] === "cancel" &&
+    !segments[4]
+  ) {
+    return handleCodexWorkerCancelRoute(runtime, req, res, decodeURIComponent(segments[2]));
   }
   if (
     method === CONTROL_SURFACE_ENDPOINTS.directoryCompletions.method &&
@@ -341,6 +390,16 @@ async function routeRequest(
     !segments[3]
   ) {
     return handleCompactPiSessionRoute(runtime, req, res);
+  }
+  if (
+    method === "GET" &&
+    segments[0] === "api" &&
+    segments[1] === "streams" &&
+    segments[2] &&
+    segments[3] === "workers" &&
+    !segments[4]
+  ) {
+    return handleBrowserWorkerSessionsRoute(runtime, req, res, decodeURIComponent(segments[2]));
   }
   if (
     (method === CONTROL_SURFACE_ENDPOINTS.runtimeWhatsAppStart.method &&

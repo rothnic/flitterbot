@@ -20,9 +20,10 @@ import {
 import {
   streamsDiffQueryOptions,
   streamsDownstreamSessionsQueryOptions,
+  streamsWorkerSessionsQueryOptions,
   streamsWorktreeQueryOptions,
 } from "~/lib/queries";
-import type { DownstreamSessionItem, PiSessionStatus } from "~/lib/types";
+import type { DownstreamSessionItem, PiSessionStatus, WorkerSessionItem } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
 function piStatusBanner(
@@ -82,8 +83,38 @@ function statusLabel(status: DownstreamSessionItem["status"]): string {
   }
 }
 
+function workerStatusDotColor(status: WorkerSessionItem["status"]): string {
+  switch (status) {
+    case "starting":
+    case "running":
+    case "waiting_for_user":
+      return "bg-emerald-500";
+    case "idle":
+    case "completed":
+      return "bg-blue-400";
+    case "canceled":
+    case "unreachable":
+      return "bg-amber-500";
+    case "failed":
+      return "bg-red-500";
+  }
+}
+
+function workerStatusLabel(status: WorkerSessionItem["status"]): string {
+  return status.replaceAll("_", " ");
+}
+
 function sessionDescription(session: DownstreamSessionItem): string {
   return session.taskDescription ?? session.project ?? session.streamName ?? "no stream";
+}
+
+function workerLabel(worker: WorkerSessionItem): string {
+  if (worker.profileId && worker.modelId) return `${worker.profileId} · ${worker.modelId}`;
+  return worker.profileId ?? worker.modelId ?? worker.runnerType.replaceAll("_", " ");
+}
+
+function latestWorkerTurn(worker: WorkerSessionItem) {
+  return worker.turns.at(-1);
 }
 
 function tmuxShortcutHintLabel(tmuxSession: string): string {
@@ -142,6 +173,8 @@ export function DownstreamSessionsPanel({
 
   const worktreeQuery = useQuery(streamsWorktreeQueryOptions(piSessionId ?? ""));
   const worktree = worktreeQuery.data;
+  const streamId = worktree?.streamId ?? null;
+  const workerSessionsQuery = useQuery(streamsWorkerSessionsQueryOptions(streamId));
   const hasWorktree = !!worktree?.worktreePath;
   const showDiff = panelView === "diff";
 
@@ -267,7 +300,7 @@ export function DownstreamSessionsPanel({
     return (
       <div className="flex flex-col h-full border-l border-border bg-background">
         <p className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-          Active Sessions
+          Worker Activity
         </p>
         <div className="flex-1 flex items-center justify-center">
           <p className="text-xs text-muted-foreground">Waiting for session…</p>
@@ -402,19 +435,87 @@ export function DownstreamSessionsPanel({
       ) : (
         <div className="flex-1 overflow-y-auto">
           <p className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-            Active Sessions
+            Worker Activity
           </p>
           {isPending && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">Loading sessions…</p>
+            <p className="px-4 py-3 text-xs text-muted-foreground">Loading legacy sessions…</p>
           )}
           {isError && (
-            <p className="px-4 py-3 text-xs text-destructive">Failed to load sessions.</p>
+            <p className="px-4 py-3 text-xs text-destructive">Failed to load legacy sessions.</p>
           )}
-          {data && data.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">No active sessions</p>
+          {!isPending && worktreeQuery.isPending && (
+            <p className="px-4 py-3 text-xs text-muted-foreground">Loading worker context…</p>
+          )}
+          {workerSessionsQuery.isPending && streamId && (
+            <p className="px-4 py-3 text-xs text-muted-foreground">Loading Codex workers…</p>
+          )}
+          {workerSessionsQuery.isError && (
+            <p className="px-4 py-3 text-xs text-destructive">Failed to load Codex workers.</p>
+          )}
+          {data &&
+            data.length === 0 &&
+            !worktreeQuery.isPending &&
+            (!streamId || !workerSessionsQuery.isPending) &&
+            (workerSessionsQuery.data?.length ?? 0) === 0 && (
+              <p className="px-4 py-3 text-xs text-muted-foreground">
+                No Codex workers or legacy sessions.
+              </p>
+            )}
+          {(workerSessionsQuery.data?.length ?? 0) > 0 && (
+            <div className="border-b border-border pb-2">
+              <p className="px-4 pt-1 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                Codex Workers
+              </p>
+              <ul className="divide-y divide-border">
+                {workerSessionsQuery.data?.map((worker) => {
+                  const latestTurn = latestWorkerTurn(worker);
+                  return (
+                    <li key={worker.workerSessionId} className="flex flex-col gap-1 px-4 py-2.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={cn(
+                            "shrink-0 h-2 w-2 rounded-full",
+                            workerStatusDotColor(worker.status),
+                          )}
+                          title={workerStatusLabel(worker.status)}
+                        />
+                        <span className="truncate font-mono text-xs text-foreground">
+                          {worker.workerSessionId.slice(0, 8)}
+                        </span>
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {workerStatusLabel(worker.status)}
+                        </span>
+                      </div>
+                      <span className="pl-2 text-xs text-muted-foreground truncate">
+                        {workerLabel(worker)}
+                        {worker.hostDisplayName ? ` on ${worker.hostDisplayName}` : ""}
+                      </span>
+                      {worker.externalThreadId && (
+                        <span className="pl-2 text-xs text-muted-foreground truncate">
+                          thread: {worker.externalThreadId}
+                        </span>
+                      )}
+                      {latestTurn?.finalOutput && (
+                        <span className="pl-2 text-xs text-muted-foreground line-clamp-2">
+                          {latestTurn.finalOutput}
+                        </span>
+                      )}
+                      {latestTurn?.errorMessage && (
+                        <span className="pl-2 text-xs text-destructive line-clamp-2">
+                          {latestTurn.errorMessage}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           )}
           {data && data.length > 0 && (
             <ul className="divide-y divide-border">
+              <li className="px-4 pt-1 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                Legacy Sessions
+              </li>
               {data.map((session) => (
                 <li key={session.sessionId} className="flex flex-col gap-1 px-4 py-2.5">
                   <div className="flex items-center gap-2 min-w-0">

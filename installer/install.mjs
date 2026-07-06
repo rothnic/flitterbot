@@ -34,12 +34,14 @@ let PROJECT_ROOT = "";
 let DRY_RUN = false;
 let AUTO_YES = false;
 let INSTALL_SCHEDULER = false;
+let INSTALL_CLAUDE_HOOKS = false;
 
 for (const arg of process.argv.slice(2)) {
   if (arg === "--dry-run") DRY_RUN = true;
   else if (arg === "--yes") AUTO_YES = true;
   else if (arg === "--with-scheduler" || arg === "--enable-scheduler") INSTALL_SCHEDULER = true;
   else if (arg === "--without-scheduler" || arg === "--skip-scheduler") INSTALL_SCHEDULER = false;
+  else if (arg === "--with-claude-hooks" || arg === "--with-legacy-claude-hooks") INSTALL_CLAUDE_HOOKS = true;
 }
 
 const TOP_LEVEL_FILES = ["uninstall.mjs", "VERSION"];
@@ -178,6 +180,10 @@ function commandExists(cmd) {
   try { execSync(`command -v ${cmd}`, { stdio: "pipe" }); return true; } catch { return false; }
 }
 
+function codexAuthConfigured() {
+  return Boolean(process.env.CODEX_ACCESS_TOKEN) || existsSync(join(HOME, ".codex", "auth.json"));
+}
+
 function generateToken() {
   return randomUUID();
 }
@@ -229,6 +235,16 @@ function manifestDeleteTarget(targetKey) {
   if (!manifest.targets || manifest.targets[targetKey] == null) return;
   delete manifest.targets[targetKey];
   writeJsonFile(MANIFEST, manifest, 0o600);
+}
+
+function manifestTargetExists(targetKey) {
+  if (!existsSync(MANIFEST)) return false;
+  try {
+    const manifest = readJsonFile(MANIFEST);
+    return Boolean(manifest.targets?.[targetKey]);
+  } catch {
+    return false;
+  }
 }
 
 function resolvePackagedRuntimeFile(rel) {
@@ -394,6 +410,10 @@ function applyLegacyCrontabText(afterText) {
 }
 
 function computeProjectRoot() {
+  if (process.env.FLITTERBOT_INSTALL_PROJECT_ROOT) {
+    PROJECT_ROOT = resolve(process.env.FLITTERBOT_INSTALL_PROJECT_ROOT);
+    return;
+  }
   if (existsSync(join(SCRIPT_DIR, "..", "src")) && existsSync(join(SCRIPT_DIR, "..", "package.json"))) {
     PROJECT_ROOT = resolve(SCRIPT_DIR, "..");
     return;
@@ -437,7 +457,13 @@ function preflight() {
       warn("systemctl not found; Linux scheduler install will be skipped.");
     }
   } else {
-    warn(`Unsupported OS: ${CURRENT_OS}. Hooks will install, scheduler may be skipped.`);
+    warn(`Unsupported OS: ${CURRENT_OS}. Scheduler may be skipped.`);
+  }
+
+  if (!commandExists("codex")) {
+    warn("codex CLI not found on PATH. Install Codex and sign in before starting Flitterbot's Codex worker runner.");
+  } else if (!codexAuthConfigured()) {
+    warn("Codex auth not found. Run `codex login` or provide CODEX_ACCESS_TOKEN before starting Flitterbot's Codex worker runner.");
   }
 
   computeProjectRoot();
@@ -454,6 +480,9 @@ function preflight() {
   info(INSTALL_SCHEDULER
     ? "Scheduler install: enabled"
     : "Scheduler install: skipped by default (pass --with-scheduler to enable)");
+  info(INSTALL_CLAUDE_HOOKS
+    ? "Claude hooks install: enabled"
+    : "Claude hooks install: skipped by default (pass --with-claude-hooks to enable legacy hook ingestion)");
   info("");
 }
 
@@ -489,22 +518,59 @@ async function bootstrapConfig() {
 
   const DEFAULT_MODELS = [
     {
-      id: "claude-opus-4-7",
-      label: "Claude Opus 4.7",
-      provider: "anthropic",
-      modelId: "claude-opus-4-7",
-    },
-    {
       id: "gpt-5.5",
       label: "GPT 5.5",
       provider: "openai-codex",
       modelId: "gpt-5.5",
     },
   ];
+  const DEFAULT_CLASSIFIER = {
+    provider: "groq",
+    model: "openai/gpt-oss-120b",
+    apiKeyEnv: "GROQ_API_KEY",
+    baseURL: "https://api.groq.com/openai/v1",
+    maxTokens: 1024,
+  };
+  const DEFAULT_CODEX_WORKER_PROFILES = [
+    {
+      id: "coding",
+      label: "Coding worker",
+      model: "gpt-5.5",
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      developerInstructions:
+        "You are a Flitterbot coding worker. Focus on the delegated task, make scoped changes, and report concise final output.",
+      skillNames: [],
+      skillPaths: [],
+    },
+    {
+      id: "light",
+      label: "Light coding worker",
+      model: "gpt-5.4-mini",
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      developerInstructions:
+        "Use this profile for simple edits, classification support, and quick repo inspection tasks.",
+      skillNames: [],
+      skillPaths: [],
+    },
+  ];
+  const DEFAULT_WORKER_HOSTS = [
+    {
+      id: "local",
+      displayName: "Local machine",
+      connectionMode: "local-stdio",
+      projectsRoot: "~/development",
+      codexHome: "~/.codex",
+      maxConcurrentWorkers: 1,
+      capabilities: {
+        role: "local",
+      },
+    },
+  ];
   const DEFAULT_AGENT_FIRST_MESSAGE =
     "Load up /skill:tasks /skill:notes and run ls on the project repositories directory. Then wait for the user";
-  const DEFAULT_NEW_STREAM_FIRST_MESSAGE_FOOTER =
-    "IMPORTANT! Before doing  anything else, load the /skill:tmux pls";
+  const DEFAULT_NEW_STREAM_FIRST_MESSAGE_FOOTER = "";
 
   const STATIC_DEFAULTS = {
     controlSurfaceHost: "127.0.0.1",
@@ -512,6 +578,10 @@ async function bootstrapConfig() {
     models: DEFAULT_MODELS,
     defaultModel: DEFAULT_MODELS[0].id,
     defaultThinkingLevel: "high",
+    classifier: DEFAULT_CLASSIFIER,
+    defaultCodexWorkerProfile: DEFAULT_CODEX_WORKER_PROFILES[0].id,
+    codexWorkerProfiles: DEFAULT_CODEX_WORKER_PROFILES,
+    workerHosts: DEFAULT_WORKER_HOSTS,
     piTransport: "websocket-cached",
     stallMinutes: 15,
     toolTimeoutMinutes: 4,
@@ -523,11 +593,12 @@ async function bootstrapConfig() {
     whatsappDaemonPath: "~/.flitterbot/whatsapp/daemon.js",
     whatsappEnabled: true,
     wipeStreamsOnStart: false,
+    shortcuts: {},
     claudeCliCommand: "claude --dangerously-skip-permissions",
     projectsDir: "~/development",
     defaultAgentFirstMessage: DEFAULT_AGENT_FIRST_MESSAGE,
     newStreamFirstMessageFooter: DEFAULT_NEW_STREAM_FIRST_MESSAGE_FOOTER,
-    tmuxEnabled: true,
+    tmuxEnabled: false,
     extraSkillPaths: [],
     learningsNotePath: "~/.flitterbot/data/learnings.md",
     todoistApiKey: "",
@@ -1027,6 +1098,38 @@ async function installHooks() {
   }
 }
 
+function hasInstalledClaudeHooks() {
+  if (!existsSync(SETTINGS)) return false;
+  let current;
+  try {
+    current = readJsonFile(SETTINGS);
+  } catch {
+    return false;
+  }
+  const hooks = current.hooks;
+  if (!hooks || typeof hooks !== "object") return false;
+  return Object.values(hooks).some((groups) =>
+    Array.isArray(groups) &&
+    groups.some(
+      (group) =>
+        Array.isArray(group?.hooks) &&
+        group.hooks.some(
+          (hook) =>
+            typeof hook?.command === "string" &&
+            hook.command.includes(`${HOOKS_DIR}/${HOOK_SCRIPT}`),
+        ),
+    ),
+  );
+}
+
+function shouldInstallClaudeHooks() {
+  return (
+    INSTALL_CLAUDE_HOOKS ||
+    manifestTargetExists("~/.claude/settings.json") ||
+    hasInstalledClaudeHooks()
+  );
+}
+
 async function installLaunchd() {
   if (CURRENT_OS !== "Darwin") return;
 
@@ -1212,7 +1315,11 @@ async function installScheduler() {
 async function main() {
   preflight();
   await deployRuntimeFiles();
-  await installHooks();
+  if (shouldInstallClaudeHooks()) {
+    await installHooks();
+  } else {
+    info("Skipping Claude hook installation. Re-run with --with-claude-hooks to enable legacy hook ingestion.");
+  }
   if (INSTALL_SCHEDULER) {
     await installScheduler();
   } else {

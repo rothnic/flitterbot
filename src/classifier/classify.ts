@@ -4,9 +4,10 @@ import {
   getRecentDefaultConversation,
 } from "../blackboard/query-messages.ts";
 import { getLatestStreamCreatedAt, listOpenWorkStreams } from "../blackboard/query-streams.ts";
+import type { FlitterbotConfig } from "../config/load-config.ts";
 import type { StreamRow } from "../contracts/index.ts";
 import { buildClassificationPrompts } from "../prompts/classifier.ts";
-import { type ClassifyResult, callGroqClassify } from "./groq-client.ts";
+import { type ClassifyResult, callClassifierClassify } from "./groq-client.ts";
 
 const DEFAULT_AGENT_PATTERNS = [
   /^\s*\/new-stream\b/i,
@@ -69,7 +70,7 @@ export type ClassificationResult = {
 export async function classifyMessage(
   message: string,
   db: BlackboardDatabase,
-  apiKey: string,
+  config: FlitterbotConfig,
   defaultPiSessionId?: string,
   ownerUser?: string,
 ): Promise<ClassificationResult> {
@@ -103,10 +104,10 @@ export async function classifyMessage(
   logClassifierPrompt(prompts);
   let result: ClassifyResult;
   try {
-    result = await callGroqClassify(apiKey, prompts);
+    result = await callClassifierClassify(config, prompts);
   } catch (error) {
     console.error(
-      `[router] Groq classification failed: ${error instanceof Error ? error.message : String(error)}`,
+      `[router] classification failed: ${error instanceof Error ? error.message : String(error)}`,
     );
     return { stream: null, action: "none" };
   }
