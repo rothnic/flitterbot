@@ -209,8 +209,9 @@ Scheduling rules:
 - Record `host_id`, app-server endpoint identity, `thread_id`, `turn_id`,
   repo path, worktree path, branch, model, sandbox policy, and approval policy
   for every downstream worker.
-- If a controller restarts, reconnect to the host and call `thread/resume`
-  before starting more work.
+- If a controller runtime is recreated, reload the worker session and call
+  `thread/resume` before starting more work. Full process-level restart and
+  remote-host restart proofs are tracked as follow-up gates.
 - If a worker host disappears, mark its sessions as `unreachable` rather than
   failed. Resume on the same host when it returns, or explicitly migrate by
   creating a new worktree/thread on another host.
@@ -264,6 +265,7 @@ pnpm run audit
 pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"
 pnpm --dir web run build
 pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --timeout-ms 180000
+pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --timeout-ms 180000
 pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth
 pnpm run e2e:worker-ui-visibility -- --cwd "$PWD"
 pnpm run e2e:codex-worker-host-scheduler
@@ -345,10 +347,12 @@ Manual proof:
 - launch a downstream Codex app-server worker on the local host
 - observe final worker output re-enter the owning orchestrator
 - send a follow-up message to the worker
+- recreate the runtime and resume the worker from stored `thread_id`
 - cancel/interrupt a running worker
 - register a second SSH worker host
 - route a new stream to that host
-- restart the controller and resume the remote thread from stored `thread_id`
+- restart the controller process and resume the remote thread from stored
+  `thread_id`
 
 ## First Slices
 
@@ -372,3 +376,4 @@ Manual proof:
 - [006 Subscription Auth Closure](./006-subscription-auth-closure.md)
 - [007 Worker Host Scheduler](./007-worker-host-scheduler.md)
 - [008 Codex-First Install Defaults](./008-codex-first-install-defaults.md)
+- [009 Worker Restart Recovery](./009-worker-restart-recovery.md)

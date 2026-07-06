@@ -13,6 +13,7 @@ function parseArgs(argv) {
     livePiHarness: false,
     audit: false,
     webBuild: false,
+    restartRecovery: false,
     timeoutMs: DEFAULT_TIMEOUT_MS,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -33,6 +34,8 @@ function parseArgs(argv) {
       opts.audit = true;
     } else if (arg === "--web-build") {
       opts.webBuild = true;
+    } else if (arg === "--restart-recovery") {
+      opts.restartRecovery = true;
     } else if (arg === "--timeout-ms" && next) {
       opts.timeoutMs = Number(next);
       i += 1;
@@ -61,6 +64,7 @@ Options:
   --cwd <path>             Project cwd for runtime proofs. Default: current dir
   --strict                 Fail when the full live Pi subscription proof is not ready
   --full-local-worker      Run the real local Codex worker control-plane E2E
+  --restart-recovery       Run the runtime-recreation Codex thread resume E2E
   --live-pi-harness        Run the live Pi harness in report mode
   --audit                  Run pnpm run audit
   --web-build              Run pnpm --dir web run build
@@ -175,6 +179,21 @@ function main() {
       runStep("fullLocalWorker", node, [
         "--experimental-strip-types",
         "scripts/e2e-codex-worker-control-plane.mjs",
+        "--cwd",
+        opts.cwd,
+        "--timeout-ms",
+        String(opts.timeoutMs),
+        "--omit-worker-host",
+      ]),
+    );
+  }
+  if (opts.restartRecovery) {
+    steps.push(
+      runStep("restartRecovery", node, [
+        "--experimental-strip-types",
+        "scripts/e2e-codex-worker-control-plane.mjs",
+        "--restart-before-followup",
+        "--skip-cancel",
         "--cwd",
         opts.cwd,
         "--timeout-ms",

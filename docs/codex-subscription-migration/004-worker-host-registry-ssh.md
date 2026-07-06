@@ -98,9 +98,11 @@ pnpm run audit
 ## Future Extension
 
 The first scheduling slice is tracked in
-[`007-worker-host-scheduler.md`](007-worker-host-scheduler.md). Remaining
-remote execution extensions are repo/worktree mapping and restart recovery that
-reconnects to the recorded host before resuming stored `thread_id` values.
+[`007-worker-host-scheduler.md`](007-worker-host-scheduler.md). Local restart
+recovery is tracked in
+[`009-worker-restart-recovery.md`](009-worker-restart-recovery.md). Remaining
+remote execution extensions are repo/worktree mapping, remote restart proof,
+and recovery for in-flight turns interrupted by controller process death.
 
 ## Verified Evidence
 

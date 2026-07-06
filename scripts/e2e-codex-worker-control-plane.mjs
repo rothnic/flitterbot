@@ -15,6 +15,7 @@ function parseArgs(argv) {
     keep: false,
     includeCancel: true,
     omitWorkerHost: false,
+    restartBeforeFollowup: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -46,6 +47,8 @@ function parseArgs(argv) {
       opts.includeCancel = false;
     } else if (arg === "--omit-worker-host") {
       opts.omitWorkerHost = true;
+    } else if (arg === "--restart-before-followup") {
+      opts.restartBeforeFollowup = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -82,6 +85,8 @@ Options:
   --timeout-ms <ms>    Completion timeout. Default: ${DEFAULT_TIMEOUT_MS}
   --skip-cancel        Skip active cancel proof
   --omit-worker-host   Omit worker_host from launch calls to test scheduler defaulting
+  --restart-before-followup
+                      Stop and recreate the runtime before resuming the Codex thread
   --keep               Keep the temp HOME for inspection`);
 }
 
@@ -235,7 +240,7 @@ async function main() {
     import("../src/config/load-config.ts"),
   ]);
 
-  const runtime = new ControlSurfaceRuntime(loadConfig());
+  let runtime = new ControlSurfaceRuntime(loadConfig());
   try {
     const stream = streams.insertStream(
       runtime.blackboard,
@@ -244,11 +249,11 @@ async function main() {
     );
     streams.enrichStream(runtime.blackboard, stream.id, opts.cwd);
 
-    const tools = runtime.createCustomTools("orchestrator", stream.id);
-    const launch = requireTool(tools, "launch_codex_worker");
-    const status = requireTool(tools, "get_codex_worker_status");
-    const followup = requireTool(tools, "send_codex_worker_followup");
-    const cancel = requireTool(tools, "cancel_codex_worker");
+    let tools = runtime.createCustomTools("orchestrator", stream.id);
+    let launch = requireTool(tools, "launch_codex_worker");
+    let status = requireTool(tools, "get_codex_worker_status");
+    let followup = requireTool(tools, "send_codex_worker_followup");
+    let cancel = requireTool(tools, "cancel_codex_worker");
 
     const launchParams = {
       profile: opts.profile,
@@ -294,6 +299,26 @@ async function main() {
     });
     assert(statusResult.details?.session?.status === "completed", "status tool did not see completed worker");
 
+    let restartedRuntime = false;
+    if (opts.restartBeforeFollowup) {
+      await runtime.stop("e2e restart recovery boundary");
+      runtime = new ControlSurfaceRuntime(loadConfig());
+      tools = runtime.createCustomTools("orchestrator", stream.id);
+      launch = requireTool(tools, "launch_codex_worker");
+      status = requireTool(tools, "get_codex_worker_status");
+      followup = requireTool(tools, "send_codex_worker_followup");
+      cancel = requireTool(tools, "cancel_codex_worker");
+      const recoveredStatus = await executeTool(status, {
+        worker_session_id: launched.workerSessionId,
+      });
+      assert(recoveredStatus.details?.active === false, "recovered runtime should not have an active worker handle");
+      assert(
+        recoveredStatus.details?.session?.external_thread_id === launched.threadId,
+        "recovered runtime did not load the persisted Codex thread id",
+      );
+      restartedRuntime = true;
+    }
+
     const followupResult = await executeTool(followup, {
       worker_session_id: launched.workerSessionId,
       prompt: "Reply exactly: flitterbot-e2e-followup-ok",
@@ -317,6 +342,22 @@ async function main() {
       followedUpSession?.host_id === launched.workerHostId,
       `follow-up changed worker host from ${launched.workerHostId} to ${followedUpSession?.host_id}`,
     );
+    assert(
+      followedUpSession?.external_thread_id === launched.threadId,
+      "follow-up changed the persisted Codex thread id",
+    );
+    const eventTypes = runtime.blackboard
+      .all(
+        "SELECT event_type FROM worker_events WHERE worker_session_id = ?",
+        launched.workerSessionId,
+      )
+      .map((row) => row.event_type);
+    if (opts.restartBeforeFollowup) {
+      assert(
+        eventTypes.includes("thread/resume/result"),
+        "restart recovery did not record a thread/resume/result worker event",
+      );
+    }
 
     let cancelProof = null;
     if (opts.includeCancel) {
@@ -357,11 +398,8 @@ async function main() {
       };
     }
 
-    const eventCountRow = runtime.blackboard.get(
-      "SELECT COUNT(*) AS count FROM worker_events WHERE worker_session_id = ?",
-      launched.workerSessionId,
-    );
-    assert((eventCountRow?.count ?? 0) > 0, "worker_events did not record app-server events");
+    const eventCountRow = { count: eventTypes.length };
+    assert(eventTypes.length > 0, "worker_events did not record app-server events");
 
     const finalTurns = workers.listWorkerTurnsBySession(runtime.blackboard, launched.workerSessionId);
     const result = {
@@ -372,6 +410,7 @@ async function main() {
       streamId: stream.id,
       workerHost: launched.workerHostId,
       omittedWorkerHost: opts.omitWorkerHost,
+      restartedRuntime,
       workerCwd: opts.workerCwd,
       workerSessionId: launched.workerSessionId,
       threadId: launched.threadId,

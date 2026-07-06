@@ -8,6 +8,7 @@
     "control-surface": "node --experimental-strip-types src/server.ts",
     "smoke:codex-worker": "node scripts/smoke-codex-worker.mjs",
     "e2e:codex-worker-control-plane": "node --experimental-strip-types scripts/e2e-codex-worker-control-plane.mjs",
+    "e2e:codex-worker-restart-recovery": "node --experimental-strip-types scripts/e2e-codex-worker-control-plane.mjs --restart-before-followup --skip-cancel",
     "e2e:live-pi-orchestrator-codex-worker": "node --experimental-strip-types scripts/e2e-live-pi-orchestrator-codex-worker.mjs",
     "e2e:worker-ui-visibility": "node --experimental-strip-types scripts/e2e-worker-ui-visibility.mjs",
     "e2e:codex-worker-host-scheduler": "node --experimental-strip-types scripts/e2e-codex-worker-host-scheduler.mjs",
