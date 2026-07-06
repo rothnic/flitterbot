@@ -115,7 +115,7 @@ Options:
                           Worker cwd on the recovery host; required for SSH hosts
   --server-restart-recovery
                           Run the real server-process Codex worker restart E2E
-  --live-pi-harness        Run the live Pi harness in report mode
+  --live-pi-harness        Run the installed-runtime live Pi harness in report mode
   --audit                  Run pnpm run audit
   --web-build              Run pnpm --dir web run build
   --timeout-ms <ms>        Timeout for full local worker E2E. Default: ${DEFAULT_TIMEOUT_MS}`);
@@ -216,9 +216,11 @@ function main() {
   if (opts.strict || opts.livePiHarness) {
     const livePiArgs = [
       "--experimental-strip-types",
-      "scripts/e2e-live-pi-orchestrator-codex-worker.mjs",
+      "scripts/e2e-installed-live-pi-orchestrator-codex-worker.mjs",
       "--cwd",
       opts.cwd,
+      "--timeout-ms",
+      String(opts.timeoutMs),
     ];
     if (!opts.strict) livePiArgs.push("--allow-missing-pi-auth");
     steps.push(runStep("livePiHarness", node, livePiArgs));

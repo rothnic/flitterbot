@@ -48,7 +48,7 @@ app-server worker output without requiring Claude Code.
 
 ```bash
 pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD"
-pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD"
+pnpm run e2e:installed-live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth
 pnpm run audit
 ```
 
@@ -71,15 +71,22 @@ count, and cancel proof.
 Live Pi orchestrator proof:
 
 ```bash
+pnpm run e2e:installed-live-pi-orchestrator-codex-worker -- --cwd "$PWD"
 pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD"
 ```
 
-This creates a fresh temporary install, copies an existing Pi `openai-codex`
-auth file into the temporary Flitterbot control-surface auth path for the run,
-creates a real stream orchestrator, sends a user prompt through the Pi queue,
-and verifies the orchestrator calls `launch_codex_worker`. If Pi
-`openai-codex` auth is absent, use `--allow-missing-pi-auth` to record the
+The installed-runtime command creates a fresh temporary install, starts the
+installed `~/.flitterbot/bin/flitterbot-up` control surface, creates a stream
+through `POST /api/streams`, and, when Pi `openai-codex` auth is present, sends
+a user prompt through `POST /message` and verifies the orchestrator calls
+`launch_codex_worker`. If Pi `openai-codex` auth is absent, use
+`--allow-missing-pi-auth` to prove install/start/stream creation and record the
 auth gate without failing local report-only validation.
+
+The in-process live Pi command remains useful as a narrower harness while
+debugging orchestrator prompts. The installed-runtime command is the Goal 003
+user-workflow proof once Pi provider auth is present; until then it proves the
+installed runtime boundary and records the remaining auth gate.
 
 ## Product Note
 
@@ -110,6 +117,12 @@ classification should use an OpenAI-compatible proxy such as 9router.
 
 2026-07-06 live Pi orchestrator proof harness:
 
+- Added `pnpm run e2e:installed-live-pi-orchestrator-codex-worker`.
+- `pnpm run e2e:installed-live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth --timeout-ms 180000`
+  completed as a skipped report after installing into a temporary `HOME`,
+  starting the installed `flitterbot-up` control surface, serving `/status`,
+  and creating a stream through the HTTP API. It then recorded the remaining Pi
+  `openai-codex` provider-auth gate.
 - Added `pnpm run e2e:live-pi-orchestrator-codex-worker`.
 - `pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth`
   completed as a skipped report because `~/.pi/agent/auth.json` does not

@@ -268,6 +268,7 @@ pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --timeout-ms 180000
 pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --timeout-ms 180000
 pnpm run e2e:codex-worker-server-restart -- --cwd "$PWD" --timeout-ms 180000
 pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000
+pnpm run e2e:installed-live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth
 pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth
 pnpm run e2e:worker-ui-visibility -- --cwd "$PWD"
 pnpm run e2e:codex-worker-host-scheduler
@@ -334,6 +335,12 @@ Verified on 2026-07-06:
   `openai-codex` Pi provider-auth gate.
   After Pi provider auth is present, rerun this command without
   `--allow-missing-pi-auth` for the full live subscription proof.
+- `pnpm run e2e:installed-live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth --timeout-ms 180000`
+  proves a fresh temporary install can start the installed `flitterbot-up`
+  control surface, serve `/status`, and create a stream through the HTTP API
+  before recording the same Pi `openai-codex` provider-auth gate. After Pi
+  provider auth is present, rerun this command without
+  `--allow-missing-pi-auth` for the installed user-workflow proof.
 - `pnpm run e2e:worker-ui-visibility -- --cwd "$PWD"` proves the bearer
   worker API and rendered operator panel states for populated, resolved
   no-stream, and pending-worktree cases.
