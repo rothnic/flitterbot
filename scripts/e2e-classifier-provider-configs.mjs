@@ -5,6 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const ORIGINAL_HOME = os.homedir();
+const ORIGINAL_CODEX_HOME = process.env.CODEX_HOME || path.join(ORIGINAL_HOME, ".codex");
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -45,7 +48,7 @@ function writeConfig(home, classifier) {
         displayName: "Local machine",
         connectionMode: "local-stdio",
         projectsRoot: process.cwd(),
-        codexHome: path.join(os.homedir(), ".codex"),
+        codexHome: ORIGINAL_CODEX_HOME,
         maxConcurrentWorkers: 1,
         capabilities: { role: "local" },
       },
@@ -96,7 +99,13 @@ function runDoctor(home, env = {}) {
     {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, ...env },
+      env: {
+        ...process.env,
+        HOME: home,
+        FLITTERBOT_HOME: path.join(home, ".flitterbot"),
+        CODEX_HOME: ORIGINAL_CODEX_HOME,
+        ...env,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );

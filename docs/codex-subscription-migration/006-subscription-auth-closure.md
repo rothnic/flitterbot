@@ -13,8 +13,9 @@ current state.
   events, approvals, and resumability.
 - **Pi orchestrator prompts** use Pi provider auth. If the orchestrator model is
   `openai-codex/gpt-5.5`, Pi needs a Pi-visible `openai-codex` credential. The
-  Codex CLI credential store does not satisfy this by itself. Flitterbot
-  resolves Pi auth by preferring a populated
+  Codex CLI credential store does not satisfy this by itself until the operator
+  explicitly imports it into Pi's auth format. Flitterbot resolves Pi auth by
+  preferring a populated
   `~/.flitterbot/control-surface/agent/auth.json` for the target provider,
   then a populated `~/.pi/agent/auth.json` for that provider; empty files and
   unrelated provider credentials are ignored for provider-specific selection.
@@ -32,17 +33,23 @@ current state.
 - Report whether the configured default orchestrator provider needs Pi
   `openai-codex` auth.
 - Report classifier auth readiness.
+- Provide `pnpm run auth:import-codex-to-pi` as an explicit operator action
+  that refreshes Codex CLI ChatGPT subscription OAuth with Pi's
+  `openai-codex` OAuth helper and writes Pi-format auth without printing
+  credential values.
 - Exit nonzero when required auth is missing, unless `--report-only` is used.
 
 ## Out Of Scope
 
 - Performing an interactive Pi provider login.
-- Copying Codex credentials into Pi auth stores.
+- Silently copying Codex credentials into Pi auth stores.
 - Guaranteeing 9router model availability.
 
 ## Validation
 
 ```bash
+pnpm run auth:import-codex-to-pi -- --dry-run
+pnpm run e2e:import-codex-auth-to-pi
 pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"
 pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
 pnpm run e2e:classifier-provider-configs
@@ -60,7 +67,7 @@ Run the aggregate readiness doctor in strict mode after Pi provider auth is
 present:
 
 ```bash
-pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --strict --full-local-worker
+pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --strict --full-local-worker --live-pi-harness
 ```
 
 ## Verified Evidence
@@ -100,6 +107,36 @@ pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --strict --full-loc
   requires Codex worker auth but does not run the live Pi harness unless
   `--live-pi-harness` is passed.
 
+2026-07-06 follow-up run after Codex-to-Pi auth import:
+
+- `pnpm run auth:import-codex-to-pi -- --dry-run` inspected the local Codex
+  CLI OAuth file and reported that a Pi-format `openai-codex` credential would
+  be selected without refreshing OAuth, writing files, or printing token values.
+- `pnpm run auth:import-codex-to-pi -- --yes` wrote
+  `~/.pi/agent/auth.json` with a Pi-visible `openai-codex` provider credential,
+  preserving unrelated providers.
+- `pnpm run e2e:installed-live-pi-orchestrator-codex-worker -- --cwd "$PWD" --timeout-ms 240000`
+  passed without `--allow-missing-pi-auth`: a temporary installed runtime
+  created a stream, sent a live Pi `openai-codex` orchestrator prompt, the
+  orchestrator called `launch_codex_worker`, and a real Codex app-server worker
+  produced routed output.
+- `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --strict --full-local-worker --live-pi-harness --timeout-ms 240000`
+  passed with `codexWorkersReady`, `piOrchestratorReady`, and
+  `fullLivePiReady` all true.
+
+2026-07-06 follow-up run after review hardening:
+
+- `--dry-run` no longer refreshes OAuth, so it cannot discard a rotated refresh
+  token.
+- Import writes now use Pi's locked `AuthStorage` path instead of a direct
+  unlocked read/merge/write.
+- Refresh failures are reported with a sanitized error message.
+- Explicit `--home` now overrides `FLITTERBOT_HOME` for control-surface target
+  resolution.
+- `pnpm run e2e:import-codex-auth-to-pi` passed with a mocked refresh response,
+  proving `--yes` gating, no-secret output, dry-run non-mutation, provider
+  merge behavior, and `0600` auth-file mode.
+
 ## Remaining Operator Action
 
 The subscription-only story is complete for coding workers, but not for live Pi
@@ -107,7 +144,19 @@ orchestrator prompts until Pi has an `openai-codex` provider credential or the
 default orchestrator is configured to a provider with available Pi auth. This is
 an external auth setup step, not a Codex app-server worker implementation gap.
 
-To close the Pi auth gate, run interactive Pi and complete provider login:
+To close the Pi auth gate from an existing Codex CLI login, run the explicit
+import command:
+
+```bash
+pnpm run auth:import-codex-to-pi -- --yes
+```
+
+The command reads `CODEX_HOME/auth.json` or `~/.codex/auth.json`, refreshes the
+Codex OAuth token through Pi's `openai-codex` OAuth implementation, and writes
+`~/.pi/agent/auth.json` in Pi's provider-auth format. It preserves unrelated Pi
+providers and prints only non-secret shape/status fields.
+
+Alternatively, run interactive Pi and complete provider login:
 
 ```bash
 pnpm exec pi
@@ -118,4 +167,5 @@ Select `ChatGPT Plus/Pro (Codex)`, then rerun:
 
 ```bash
 pnpm run doctor:codex-subscription-auth
+pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --strict --full-local-worker --live-pi-harness --timeout-ms 180000
 ```

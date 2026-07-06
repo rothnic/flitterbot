@@ -196,6 +196,7 @@ function main() {
       "--report-only",
     ]),
   );
+  steps.push(runStep("importCodexAuthToPi", node, ["scripts/e2e-import-codex-auth-to-pi.mjs"]));
   steps.push(runStep("classifierProviderConfigs", node, ["scripts/e2e-classifier-provider-configs.mjs"]));
   steps.push(runStep("codexFirstInstallDefaults", node, ["scripts/e2e-codex-first-install-defaults.mjs"]));
   steps.push(runStep("workerHostConfigure", node, ["scripts/e2e-worker-host-configure.mjs"]));
@@ -295,9 +296,9 @@ function main() {
   const nextAction = !codexWorkersReady
     ? "Install Codex CLI and run codex login so Codex app-server workers can authenticate."
     : !piOrchestratorReady
-      ? "Run pnpm exec pi, use /login, select ChatGPT Plus/Pro (Codex), then rerun this doctor with --strict."
-      : !fullLivePiReady
-        ? "Run this doctor with --strict to execute the full live Pi orchestrator proof."
+      ? "Run pnpm run auth:import-codex-to-pi -- --yes, or run pnpm exec pi and /login to ChatGPT Plus/Pro (Codex), then rerun this doctor with --strict."
+    : !fullLivePiReady
+        ? "Run this doctor with --strict --live-pi-harness to execute the full live Pi orchestrator proof."
         : "All Codex subscription readiness gates passed.";
 
   const report = {

@@ -17,6 +17,18 @@ real `/message` prompt fails with `No API key found for openai-codex` because
 Pi reads `~/.pi/agent/auth.json` or
 `~/.flitterbot/control-surface/agent/auth.json`.
 
+Flitterbot now provides an explicit bridge for operators who already have Codex
+CLI ChatGPT subscription auth:
+
+```bash
+pnpm run auth:import-codex-to-pi -- --yes
+```
+
+The bridge refreshes the Codex CLI OAuth credential through Pi's
+`openai-codex` OAuth implementation and writes Pi-format auth without printing
+secret values. Interactive `pnpm exec pi` plus `/login` remains the native Pi
+provider-auth path.
+
 That does not mean orchestrator prompts should bypass Pi. The intended split is:
 
 - **Pi orchestrator prompts**: default agent, stream orchestrators, routing, and
@@ -273,6 +285,8 @@ pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-p
 pnpm run e2e:worker-ui-visibility -- --cwd "$PWD"
 pnpm run e2e:codex-worker-host-scheduler
 pnpm run e2e:worker-host-configure
+pnpm run auth:import-codex-to-pi -- --dry-run
+pnpm run e2e:import-codex-auth-to-pi
 pnpm run e2e:codex-first-install-defaults
 pnpm run e2e:classifier-provider-configs
 pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
@@ -361,6 +375,22 @@ Verified on 2026-07-06:
   the post-login strict mode needed for the final live Pi subscription proof.
   Report mode does not run the live Pi harness unless `--live-pi-harness` is
   passed.
+- `pnpm run auth:import-codex-to-pi -- --dry-run` inspects the local Codex CLI
+  OAuth file and reports that a Pi-format `openai-codex` credential would be
+  selected without refreshing OAuth, writing files, or printing token values.
+- `pnpm run e2e:import-codex-auth-to-pi` proves the importer with a mocked
+  refresh response, including `--yes` gating, no-secret output, dry-run
+  non-mutation, provider merge behavior, and `0600` auth-file mode.
+- `pnpm run auth:import-codex-to-pi -- --yes` writes that Pi-format
+  `openai-codex` credential to `~/.pi/agent/auth.json`.
+- `pnpm run e2e:installed-live-pi-orchestrator-codex-worker -- --cwd "$PWD" --timeout-ms 240000`
+  passes without the missing-auth allowance: a temporary installed runtime can
+  create a stream, send a live Pi `openai-codex` orchestrator prompt, have Pi
+  call `launch_codex_worker`, and route the real Codex app-server worker output
+  back into the stream.
+- `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --strict --full-local-worker --live-pi-harness --timeout-ms 240000`
+  passes with `codexWorkersReady`, `piOrchestratorReady`, and
+  `fullLivePiReady` all true.
 
 Manual proof:
 

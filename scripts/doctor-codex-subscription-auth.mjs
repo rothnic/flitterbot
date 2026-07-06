@@ -242,7 +242,7 @@ async function main() {
       authFiles: piAuthFiles,
       reason: piProviderReady
         ? "Pi provider auth present or default provider does not require openai-codex Pi auth"
-        : "Pi openai-codex provider auth is missing; Codex CLI auth does not satisfy Pi provider auth. Run pi interactively, use /login, and select ChatGPT Plus/Pro (Codex).",
+        : "Pi openai-codex provider auth is missing; Codex CLI auth does not satisfy Pi provider auth until imported. Run pnpm run auth:import-codex-to-pi -- --yes, or run pi interactively, use /login, and select ChatGPT Plus/Pro (Codex).",
     },
     classifier,
     decision: {
