@@ -44,6 +44,7 @@ current state.
 
 ```bash
 pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
+pnpm run e2e:classifier-provider-configs
 pnpm run audit
 ```
 
@@ -80,6 +81,10 @@ pnpm run doctor:codex-subscription-auth
   to populated global `openai-codex` auth, unrelated control provider auth does
   not shadow global `openai-codex` auth, and populated control
   `openai-codex` auth wins.
+- `pnpm run e2e:classifier-provider-configs` passed and verified doctor/config
+  readiness reporting for classifier providers `disabled`, `groq`, `openai`,
+  `openai-compatible`, and `pi`, including missing-key, API-key-present,
+  9router-style base URL, and Pi provider-auth-present/missing cases.
 
 ## Remaining Operator Action
 

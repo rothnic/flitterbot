@@ -261,6 +261,15 @@ Run:
 
 ```bash
 pnpm run audit
+pnpm --dir web run build
+pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --timeout-ms 180000
+pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth
+pnpm run e2e:worker-ui-visibility -- --cwd "$PWD"
+pnpm run e2e:codex-worker-host-scheduler
+pnpm run e2e:codex-first-install-defaults
+pnpm run e2e:classifier-provider-configs
+pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
+pnpm run doctor:codex-worker-hosts -- --fresh-local --cwd "$PWD"
 node --input-type=module -e 'import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all"; if (!getBuiltinModel("openai-codex", "gpt-5.5")) process.exit(1)'
 codex login status
 codex debug app-server send-message-v2 "Summarize this repo."
@@ -292,6 +301,30 @@ Verified on 2026-07-04:
   can resolve the installed `light` Codex worker profile, start a real
   app-server thread with profile model/instructions, and persist the profile
   metadata with the worker session.
+
+Verified on 2026-07-06:
+
+- `pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --timeout-ms 180000`
+  proves a clean temporary runtime can launch, inspect, follow up, cancel,
+  persist, and route real Codex app-server worker output through the
+  orchestrator tool surface.
+- `pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth`
+  proves the live Pi orchestrator harness and records the remaining external
+  `openai-codex` Pi provider-auth gate.
+  After Pi provider auth is present, rerun this command without
+  `--allow-missing-pi-auth` for the full live subscription proof.
+- `pnpm run e2e:worker-ui-visibility -- --cwd "$PWD"` proves the bearer
+  worker API and rendered operator panel states for populated, resolved
+  no-stream, and pending-worktree cases.
+- `pnpm run e2e:codex-worker-host-scheduler` proves capacity-aware local/remote
+  worker host selection, explicit host override, reservation, stale-heartbeat
+  exclusion, and unreachable-host exclusion.
+- `pnpm run e2e:codex-first-install-defaults` proves fresh installs are
+  Codex-first and Claude hooks are legacy opt-in or preserved only when already
+  managed.
+- `pnpm run e2e:classifier-provider-configs` proves classifier config/auth
+  readiness reporting for `disabled`, `groq`, `openai`, `openai-compatible`,
+  and `pi`.
 
 Manual proof:
 
