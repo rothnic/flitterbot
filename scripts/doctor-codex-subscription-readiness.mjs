@@ -14,6 +14,9 @@ function parseArgs(argv) {
     audit: false,
     webBuild: false,
     restartRecovery: false,
+    restartRecoveryWorkerHost: undefined,
+    restartRecoverySshTarget: undefined,
+    restartRecoveryWorkerCwd: undefined,
     timeoutMs: DEFAULT_TIMEOUT_MS,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -36,6 +39,15 @@ function parseArgs(argv) {
       opts.webBuild = true;
     } else if (arg === "--restart-recovery") {
       opts.restartRecovery = true;
+    } else if (arg === "--restart-recovery-worker-host" && next) {
+      opts.restartRecoveryWorkerHost = next;
+      i += 1;
+    } else if (arg === "--restart-recovery-ssh-target" && next) {
+      opts.restartRecoverySshTarget = next;
+      i += 1;
+    } else if (arg === "--restart-recovery-worker-cwd" && next) {
+      opts.restartRecoveryWorkerCwd = next;
+      i += 1;
     } else if (arg === "--timeout-ms" && next) {
       opts.timeoutMs = Number(next);
       i += 1;
@@ -49,7 +61,34 @@ function parseArgs(argv) {
   if (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0) {
     throw new Error("--timeout-ms must be a positive number");
   }
+  validateRestartRecoveryOptions(opts);
   return opts;
+}
+
+function validateRestartRecoveryOptions(opts) {
+  const hasRecoveryHost = Boolean(opts.restartRecoveryWorkerHost);
+  const hasRecoverySshTarget = Boolean(opts.restartRecoverySshTarget);
+  const hasRecoveryWorkerCwd = Boolean(opts.restartRecoveryWorkerCwd);
+  const hasRecoveryDetail = hasRecoveryHost || hasRecoverySshTarget || hasRecoveryWorkerCwd;
+  if (hasRecoveryDetail && !opts.restartRecovery) {
+    throw new Error("restart recovery host options require --restart-recovery");
+  }
+  if ((hasRecoverySshTarget || hasRecoveryWorkerCwd) && !hasRecoveryHost) {
+    throw new Error(
+      "--restart-recovery-ssh-target and --restart-recovery-worker-cwd require --restart-recovery-worker-host",
+    );
+  }
+  if (opts.restartRecoveryWorkerHost && opts.restartRecoveryWorkerHost !== "local") {
+    if (!opts.restartRecoverySshTarget) {
+      throw new Error("--restart-recovery-ssh-target is required for non-local recovery hosts");
+    }
+    if (!opts.restartRecoveryWorkerCwd) {
+      throw new Error("--restart-recovery-worker-cwd is required for non-local recovery hosts");
+    }
+  }
+  if (opts.restartRecoveryWorkerHost === "local" && opts.restartRecoverySshTarget) {
+    throw new Error("--restart-recovery-ssh-target cannot be used with local recovery host");
+  }
 }
 
 function printHelp() {
@@ -65,6 +104,12 @@ Options:
   --strict                 Fail when the full live Pi subscription proof is not ready
   --full-local-worker      Run the real local Codex worker control-plane E2E
   --restart-recovery       Run the runtime-recreation Codex thread resume E2E
+  --restart-recovery-worker-host <id>
+                          Worker host for restart recovery, for example vps-gw
+  --restart-recovery-ssh-target <target>
+                          SSH target when restart recovery uses an SSH host
+  --restart-recovery-worker-cwd <path>
+                          Worker cwd on the recovery host; required for SSH hosts
   --live-pi-harness        Run the live Pi harness in report mode
   --audit                  Run pnpm run audit
   --web-build              Run pnpm --dir web run build
@@ -188,18 +233,29 @@ function main() {
     );
   }
   if (opts.restartRecovery) {
+    const restartRecoveryArgs = [
+      "--experimental-strip-types",
+      "scripts/e2e-codex-worker-control-plane.mjs",
+      "--restart-before-followup",
+      "--skip-cancel",
+      "--cwd",
+      opts.cwd,
+      "--timeout-ms",
+      String(opts.timeoutMs),
+    ];
+    if (opts.restartRecoveryWorkerHost) {
+      restartRecoveryArgs.push("--worker-host", opts.restartRecoveryWorkerHost);
+      if (opts.restartRecoverySshTarget) {
+        restartRecoveryArgs.push("--ssh-target", opts.restartRecoverySshTarget);
+      }
+      if (opts.restartRecoveryWorkerCwd) {
+        restartRecoveryArgs.push("--worker-cwd", opts.restartRecoveryWorkerCwd);
+      }
+    } else {
+      restartRecoveryArgs.push("--omit-worker-host");
+    }
     steps.push(
-      runStep("restartRecovery", node, [
-        "--experimental-strip-types",
-        "scripts/e2e-codex-worker-control-plane.mjs",
-        "--restart-before-followup",
-        "--skip-cancel",
-        "--cwd",
-        opts.cwd,
-        "--timeout-ms",
-        String(opts.timeoutMs),
-        "--omit-worker-host",
-      ]),
+      runStep("restartRecovery", node, restartRecoveryArgs),
     );
   }
   if (opts.webBuild) {

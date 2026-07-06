@@ -101,12 +101,12 @@ The first scheduling slice is tracked in
 [`007-worker-host-scheduler.md`](007-worker-host-scheduler.md). Local restart
 recovery is tracked in
 [`009-worker-restart-recovery.md`](009-worker-restart-recovery.md). Remaining
-remote execution extensions are repo/worktree mapping, remote restart proof,
-and recovery for in-flight turns interrupted by controller process death.
+remote execution extensions are repo/worktree mapping and recovery for
+in-flight turns interrupted by controller process death.
 
 ## Verified Evidence
 
-2026-07-06 local run:
+2026-07-06 local and SSH runs:
 
 - `pnpm run doctor:codex-worker-hosts -- --fresh-local --cwd "$PWD"` passed
   against a temporary `HOME` and fresh blackboard.
@@ -117,6 +117,9 @@ and recovery for in-flight turns interrupted by controller process death.
 - The SSH run started Codex app-server through SSH stdio, completed launch and
   follow-up turns, wrote 42 worker events, and routed two worker completion
   messages back into the local stream.
+- `pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000`
+  passed against `vps-gw`, recreated the runtime between initial and follow-up
+  turns, and resumed the stored Codex thread through SSH stdio.
 - `pnpm run e2e:worker-host-configure` passed against a temporary config and
   proved adding `vps-dev`, adding `vps-gw`, updating `vps-dev` capacity and
   scheduler flags, preserving existing capabilities, dry-run non-persistence,

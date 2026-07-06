@@ -266,6 +266,7 @@ pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"
 pnpm --dir web run build
 pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --timeout-ms 180000
 pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --timeout-ms 180000
+pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000
 pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth
 pnpm run e2e:worker-ui-visibility -- --cwd "$PWD"
 pnpm run e2e:codex-worker-host-scheduler
@@ -312,6 +313,13 @@ Verified on 2026-07-06:
   proves a clean temporary runtime can launch, inspect, follow up, cancel,
   persist, and route real Codex app-server worker output through the
   orchestrator tool surface.
+- `pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --timeout-ms 180000`
+  proves a recreated runtime can load a persisted local worker session, call
+  `thread/resume`, record the resume event, and complete a follow-up on the
+  same Codex thread.
+- `pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000`
+  proves the same runtime-recreation recovery path against an SSH-backed
+  `vps-gw` worker host.
 - `pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth`
   proves the live Pi orchestrator harness and records the remaining external
   `openai-codex` Pi provider-auth gate.

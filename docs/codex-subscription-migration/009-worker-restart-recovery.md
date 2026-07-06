@@ -23,7 +23,7 @@ and complete a follow-up turn on the same recorded worker session.
 
 - Resuming an in-flight turn that was interrupted by process death.
 - Proving a full control-surface process restart through the CLI/service layer.
-- Proving SSH/remote-host restart recovery by default.
+- Running SSH/remote-host restart recovery by default.
 - Migrating a worker session to a different host.
 - Long-lived WebSocket or Unix-socket worker daemons.
 
@@ -32,6 +32,8 @@ and complete a follow-up turn on the same recorded worker session.
 ```bash
 pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --timeout-ms 180000
 pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --restart-recovery
+pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000
+pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --restart-recovery --restart-recovery-worker-host vps-gw --restart-recovery-ssh-target vps-gw --restart-recovery-worker-cwd /home/ubuntu/data/projects/assura-cold-audit
 pnpm run audit
 ```
 
@@ -49,8 +51,21 @@ pnpm run audit
 
 ## Future Extensions
 
-- Run the same recovery proof against a configured SSH worker host, for example
-  with `--worker-host vps-gw --ssh-target vps-gw --worker-cwd <remote-path>`.
 - Add a subprocess-level control-surface restart proof that exercises PID,
   server, and command-wrapper lifecycle.
 - Add recovery for in-flight turns interrupted by controller process death.
+
+## Verified Evidence
+
+2026-07-06 local and SSH runs:
+
+- `pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --timeout-ms 180000`
+  passed against a local Codex app-server worker.
+- `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --restart-recovery --timeout-ms 180000`
+  included the local runtime-recreation recovery proof in the aggregate
+  readiness report.
+- `pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000`
+  passed against the SSH-backed `vps-gw` worker host.
+- The SSH proof launched the initial turn on `vps-gw`, recreated the runtime,
+  resumed the stored Codex thread, completed a follow-up, and preserved the
+  worker session, host, and thread IDs.
