@@ -1,0 +1,58 @@
+# Worker UI Visibility
+
+## Objective
+
+Expose Codex worker sessions in the operator UI so coding work is visible
+without querying SQLite directly.
+
+## Scope
+
+- Add an API route for worker sessions by stream.
+- Return worker host, runner, profile, model, status, thread id, turn ids,
+  final output, and errors.
+- Render Codex worker sessions in the existing stream side panel alongside
+  legacy downstream/tmux sessions.
+- Keep legacy session visibility intact.
+
+## Out Of Scope
+
+- Starting, following up, or canceling workers from the web UI.
+- Streaming every app-server event into the browser.
+- Remote host scheduling.
+
+## Definition Of Done
+
+- `GET /api/streams/:streamId/workers` returns neutral worker session rows for
+  the stream.
+- The web side panel displays a `Codex Workers` section when worker sessions
+  exist.
+- Each worker row shows status, worker session id, profile/model, host, thread
+  id, and latest final output or error.
+- Existing legacy downstream/tmux session rendering remains available.
+- `pnpm run audit` and `pnpm --dir web run build` pass.
+
+## Validation
+
+```bash
+pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD"
+pnpm run audit
+pnpm --dir web run build
+```
+
+Manual UI proof:
+
+1. Start the control surface and web UI.
+2. Open a stream where a Codex worker has completed.
+3. Confirm the side panel shows `Codex Workers`, status, host/profile/model,
+   thread id, and latest output.
+
+## Verified Evidence
+
+2026-07-06 local run:
+
+- A direct route smoke created a temporary runtime and blackboard, inserted a
+  `codex_app_server` worker session and turn, called
+  `handleBrowserWorkerSessionsRoute`, and returned one item with final output
+  `worker-api-ok`.
+- `pnpm --dir web run build` passed with the existing Vite large-chunk warning.
+- `pnpm run audit` passed.

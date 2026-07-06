@@ -157,6 +157,50 @@ export type DownstreamSessionItem = {
   project: string | null;
 };
 
+export type WorkerTurnItem = {
+  workerTurnId: string;
+  externalTurnId: string | null;
+  status: "queued" | "running" | "waiting_for_user" | "completed" | "failed" | "canceled";
+  prompt: string | null;
+  finalOutput: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+};
+
+export type WorkerSessionItem = {
+  workerSessionId: string;
+  runnerType: "codex_app_server" | "codex_exec" | "claude_tmux" | "pi";
+  status:
+    | "starting"
+    | "running"
+    | "waiting_for_user"
+    | "idle"
+    | "completed"
+    | "failed"
+    | "canceled"
+    | "unreachable";
+  hostId: string | null;
+  hostDisplayName: string | null;
+  connectionMode: "local-stdio" | "ssh-stdio" | "unix-socket" | "websocket-auth" | null;
+  cwd: string;
+  repoPath: string | null;
+  worktreePath: string | null;
+  branch: string | null;
+  modelProvider: string | null;
+  modelId: string | null;
+  profileId: string | null;
+  externalThreadId: string | null;
+  externalSessionId: string | null;
+  approvalPolicy: string | null;
+  sandboxPolicy: string | null;
+  startedAt: string;
+  lastEventAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+  turns: WorkerTurnItem[];
+};
+
 export type SessionDetailResponse = {
   session: SessionDetail;
   tmux?: TmuxSessionInspection | null;

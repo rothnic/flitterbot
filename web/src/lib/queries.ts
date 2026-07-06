@@ -6,6 +6,7 @@ import type {
   DownstreamSessionItem,
   SkillListItem,
   StatusResponse,
+  WorkerSessionItem,
 } from "~/lib/types";
 import {
   type DirectoryCompletionsResult,
@@ -18,6 +19,7 @@ import {
   fetchStreamsHistory,
   fetchStreamsInputHistory,
   fetchStreamsWorktree,
+  fetchWorkerSessions,
   type StreamInfo,
 } from "~/server/streams";
 import { fetchUserConfig } from "~/server/user-config";
@@ -103,6 +105,16 @@ export function streamsDownstreamSessionsQueryOptions(piSessionId: string) {
       fetchDownstreamSessions({ data: { piSessionId } }),
     enabled: !!piSessionId,
     staleTime: 30_000,
+  };
+}
+
+export function streamsWorkerSessionsQueryOptions(streamId: string | undefined | null) {
+  return {
+    queryKey: ["streams-worker-sessions", streamId ?? "none"] as const,
+    queryFn: (): Promise<WorkerSessionItem[]> =>
+      fetchWorkerSessions({ data: { streamId: streamId ?? "" } }),
+    enabled: !!streamId,
+    staleTime: 10_000,
   };
 }
 

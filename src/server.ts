@@ -29,6 +29,7 @@ import {
   handleBrowserUserConfigGetRoute,
   handleBrowserUserConfigPutRoute,
 } from "./routes/browser-user-config.ts";
+import { handleBrowserWorkerSessionsRoute } from "./routes/browser-worker-sessions.ts";
 import { handleCloseStreamNoopRoute } from "./routes/close-stream.ts";
 import { handleCompactPiSessionRoute } from "./routes/compact-pi-session.ts";
 import { handleCreateStreamRoute } from "./routes/create-stream.ts";
@@ -341,6 +342,16 @@ async function routeRequest(
     !segments[3]
   ) {
     return handleCompactPiSessionRoute(runtime, req, res);
+  }
+  if (
+    method === "GET" &&
+    segments[0] === "api" &&
+    segments[1] === "streams" &&
+    segments[2] &&
+    segments[3] === "workers" &&
+    !segments[4]
+  ) {
+    return handleBrowserWorkerSessionsRoute(runtime, req, res, decodeURIComponent(segments[2]));
   }
   if (
     (method === CONTROL_SURFACE_ENDPOINTS.runtimeWhatsAppStart.method &&
