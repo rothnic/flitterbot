@@ -5,9 +5,10 @@ Claude Code as the primary agent path.
 
 ## Current State
 
-Flitterbot already resolves `openai-codex` models through the Pi SDK catalog.
-The installed config currently seeds both Codex and Claude model entries, and
-the current SDK catalog resolves `openai-codex/gpt-5.5`.
+Flitterbot resolves `openai-codex` models through the Pi SDK catalog. Fresh
+installs seed `openai-codex/gpt-5.5` as the orchestration model and keep
+Anthropic model entries as explicit legacy configuration. The current SDK
+catalog resolves `openai-codex/gpt-5.5`.
 
 Important tested limitation: Pi provider auth is not the same auth store as
 Codex CLI auth. A clean Flitterbot runtime with `~/.codex/auth.json` copied in
@@ -46,13 +47,18 @@ It is now configurable through `classifier` in `~/.flitterbot/config.json`:
 - `provider: "disabled"` skips classifier calls and routes to the default
   fallback.
 
-The remaining Claude-specific surface is the downstream worker loop:
+The remaining Claude-specific surface is legacy compatibility, not the default
+main path:
 
-- installer writes lifecycle hooks to `~/.claude/settings.json`
-- tmux skill launches `claude --dangerously-skip-permissions`
+- installer writes lifecycle hooks to `~/.claude/settings.json` only when
+  `--with-claude-hooks` is passed or an existing managed hook install is being
+  preserved
+- tmux skill can launch `claude --dangerously-skip-permissions` when
+  `tmuxEnabled` is explicitly enabled
 - hook ingestion expects Claude Code payloads, including `last_assistant_message`
 - tmux state detection treats the live process name `claude` as the agent
-- docs and user prompts describe Claude Code sessions as the worker substrate
+- docs and user prompts should describe Codex workers as the primary substrate
+  and Claude/tmux as legacy opt-in compatibility
 
 ## Research Notes
 
@@ -321,3 +327,5 @@ Manual proof:
 - [004 Worker Host Registry And SSH Readiness](./004-worker-host-registry-ssh.md)
 - [005 Worker UI Visibility](./005-worker-ui-visibility.md)
 - [006 Subscription Auth Closure](./006-subscription-auth-closure.md)
+- [007 Worker Host Scheduler](./007-worker-host-scheduler.md)
+- [008 Codex-First Install Defaults](./008-codex-first-install-defaults.md)

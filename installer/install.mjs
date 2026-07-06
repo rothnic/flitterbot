@@ -34,12 +34,14 @@ let PROJECT_ROOT = "";
 let DRY_RUN = false;
 let AUTO_YES = false;
 let INSTALL_SCHEDULER = false;
+let INSTALL_CLAUDE_HOOKS = false;
 
 for (const arg of process.argv.slice(2)) {
   if (arg === "--dry-run") DRY_RUN = true;
   else if (arg === "--yes") AUTO_YES = true;
   else if (arg === "--with-scheduler" || arg === "--enable-scheduler") INSTALL_SCHEDULER = true;
   else if (arg === "--without-scheduler" || arg === "--skip-scheduler") INSTALL_SCHEDULER = false;
+  else if (arg === "--with-claude-hooks" || arg === "--with-legacy-claude-hooks") INSTALL_CLAUDE_HOOKS = true;
 }
 
 const TOP_LEVEL_FILES = ["uninstall.mjs", "VERSION"];
@@ -235,6 +237,16 @@ function manifestDeleteTarget(targetKey) {
   writeJsonFile(MANIFEST, manifest, 0o600);
 }
 
+function manifestTargetExists(targetKey) {
+  if (!existsSync(MANIFEST)) return false;
+  try {
+    const manifest = readJsonFile(MANIFEST);
+    return Boolean(manifest.targets?.[targetKey]);
+  } catch {
+    return false;
+  }
+}
+
 function resolvePackagedRuntimeFile(rel) {
   const candidates = [
     PROJECT_ROOT && join(PROJECT_ROOT, "installer", rel),
@@ -398,6 +410,10 @@ function applyLegacyCrontabText(afterText) {
 }
 
 function computeProjectRoot() {
+  if (process.env.FLITTERBOT_INSTALL_PROJECT_ROOT) {
+    PROJECT_ROOT = resolve(process.env.FLITTERBOT_INSTALL_PROJECT_ROOT);
+    return;
+  }
   if (existsSync(join(SCRIPT_DIR, "..", "src")) && existsSync(join(SCRIPT_DIR, "..", "package.json"))) {
     PROJECT_ROOT = resolve(SCRIPT_DIR, "..");
     return;
@@ -441,7 +457,7 @@ function preflight() {
       warn("systemctl not found; Linux scheduler install will be skipped.");
     }
   } else {
-    warn(`Unsupported OS: ${CURRENT_OS}. Hooks will install, scheduler may be skipped.`);
+    warn(`Unsupported OS: ${CURRENT_OS}. Scheduler may be skipped.`);
   }
 
   if (!commandExists("codex")) {
@@ -464,6 +480,9 @@ function preflight() {
   info(INSTALL_SCHEDULER
     ? "Scheduler install: enabled"
     : "Scheduler install: skipped by default (pass --with-scheduler to enable)");
+  info(INSTALL_CLAUDE_HOOKS
+    ? "Claude hooks install: enabled"
+    : "Claude hooks install: skipped by default (pass --with-claude-hooks to enable legacy hook ingestion)");
   info("");
 }
 
@@ -503,12 +522,6 @@ async function bootstrapConfig() {
       label: "GPT 5.5",
       provider: "openai-codex",
       modelId: "gpt-5.5",
-    },
-    {
-      id: "claude-opus-4-7",
-      label: "Claude Opus 4.7",
-      provider: "anthropic",
-      modelId: "claude-opus-4-7",
     },
   ];
   const DEFAULT_CLASSIFIER = {
@@ -557,8 +570,7 @@ async function bootstrapConfig() {
   ];
   const DEFAULT_AGENT_FIRST_MESSAGE =
     "Load up /skill:tasks /skill:notes and run ls on the project repositories directory. Then wait for the user";
-  const DEFAULT_NEW_STREAM_FIRST_MESSAGE_FOOTER =
-    "IMPORTANT! Before doing  anything else, load the /skill:tmux pls";
+  const DEFAULT_NEW_STREAM_FIRST_MESSAGE_FOOTER = "";
 
   const STATIC_DEFAULTS = {
     controlSurfaceHost: "127.0.0.1",
@@ -586,7 +598,7 @@ async function bootstrapConfig() {
     projectsDir: "~/development",
     defaultAgentFirstMessage: DEFAULT_AGENT_FIRST_MESSAGE,
     newStreamFirstMessageFooter: DEFAULT_NEW_STREAM_FIRST_MESSAGE_FOOTER,
-    tmuxEnabled: true,
+    tmuxEnabled: false,
     extraSkillPaths: [],
     learningsNotePath: "~/.flitterbot/data/learnings.md",
     todoistApiKey: "",
@@ -1086,6 +1098,38 @@ async function installHooks() {
   }
 }
 
+function hasInstalledClaudeHooks() {
+  if (!existsSync(SETTINGS)) return false;
+  let current;
+  try {
+    current = readJsonFile(SETTINGS);
+  } catch {
+    return false;
+  }
+  const hooks = current.hooks;
+  if (!hooks || typeof hooks !== "object") return false;
+  return Object.values(hooks).some((groups) =>
+    Array.isArray(groups) &&
+    groups.some(
+      (group) =>
+        Array.isArray(group?.hooks) &&
+        group.hooks.some(
+          (hook) =>
+            typeof hook?.command === "string" &&
+            hook.command.includes(`${HOOKS_DIR}/${HOOK_SCRIPT}`),
+        ),
+    ),
+  );
+}
+
+function shouldInstallClaudeHooks() {
+  return (
+    INSTALL_CLAUDE_HOOKS ||
+    manifestTargetExists("~/.claude/settings.json") ||
+    hasInstalledClaudeHooks()
+  );
+}
+
 async function installLaunchd() {
   if (CURRENT_OS !== "Darwin") return;
 
@@ -1271,7 +1315,11 @@ async function installScheduler() {
 async function main() {
   preflight();
   await deployRuntimeFiles();
-  await installHooks();
+  if (shouldInstallClaudeHooks()) {
+    await installHooks();
+  } else {
+    info("Skipping Claude hook installation. Re-run with --with-claude-hooks to enable legacy hook ingestion.");
+  }
   if (INSTALL_SCHEDULER) {
     await installScheduler();
   } else {

@@ -1,6 +1,6 @@
 # Flitterbot — Features Overview
 
-Orchestration layer above Pi-managed agent streams. A long-running control surface hosts concurrent Pi agent sessions — one default for triage, one orchestrator per active workstream — behind a configurable classifier. State in SQLite; user interaction via WhatsApp and web client (bidirectionally synced); legacy Claude Code sessions report back via hooks while Codex app-server worker migration is underway; OS-level cron injects periodic health checks.
+Orchestration layer above Pi-managed agent streams. A long-running control surface hosts concurrent Pi agent sessions — one default for triage, one orchestrator per active workstream — behind a configurable classifier. State in SQLite; user interaction via WhatsApp and web client (bidirectionally synced); Codex app-server workers perform delegated coding work; optional legacy Claude Code sessions can report back via hooks; OS-level cron injects periodic health checks.
 
 ## How It Works
 
@@ -23,7 +23,7 @@ Each Pi session has its own FIFO turn queue; all agents process concurrently.
 
 Default agent creates streams via `create_stream` — inserts a SQLite row, spawns a bound orchestrator, and by default passes relevant user context through to the new stream. For normal single-stream creation, the runtime looks at up to 10 recent default-surface real user messages (`web`/`whatsapp`, `sender=user`, no `stream_id`) after the previous stream creation boundary, asks the configured relevance classifier which messages belong in the new stream, forces the current user message in if missing, and formats those messages as the orchestrator's initial prompt. The relevance classifier sees the stream name, the default agent's optional `message` as the stream purpose/agent context, and the candidate user messages; it is instructed to omit vague default-agent orchestration prompts unless that purpose makes the concrete task clear. If relevance classification fails, it falls back to the current user message only. `skipUserMessage=true` is reserved for batch-created streams where the default agent supplies a targeted full prompt in `message`; that mode skips user-message passthrough entirely.
 
-The orchestrator enriches the stream (repo, git worktree via `set_up_worktree`), launches Claude Code sessions in tmux, and coordinates waves through prompt-based delegation. On completion, `close_stream` merges to the confirmed base branch, pushes when permitted by the close flow, closes the row, and the runtime destroys the orchestrator.
+The orchestrator enriches the stream (repo, git worktree via `set_up_worktree`), launches Codex app-server workers for delegated coding tasks, and coordinates waves through prompt-based delegation. Legacy tmux/Claude sessions remain available only when explicitly configured. On completion, `close_stream` merges to the confirmed base branch, pushes when permitted by the close flow, closes the row, and the runtime destroys the orchestrator.
 
 Soft-deleted: `status` flips to `closed` with `closed_at`. Recently closed streams (7d) are stored for status reporting and reopening via API.
 
@@ -105,7 +105,7 @@ Stream-backed roles with tailored system prompts and role-gated tools:
 
 **Default streams** — per non-default WhatsApp user streams (`streams.type = "defaultStream"`). They use the same default-agent prompt and tools as the real default session, and new default streams are seeded with `defaultAgentFirstMessage`.
 
-**Orchestrators** — ephemeral work sessions, one per work stream. Manage Claude Code sessions. Tools: `set_up_worktree` (inspect/apply stream worktree setup), `close_stream` (confirmed merge/noop close flow, cleanup, self-destruct). Cannot write code directly.
+**Orchestrators** — ephemeral work sessions, one per work stream. Manage Codex worker sessions through `launch_codex_worker`, `get_codex_worker_status`, `send_codex_worker_followup`, and `cancel_codex_worker`. Tools also include `set_up_worktree` (inspect/apply stream worktree setup) and `close_stream` (confirmed merge/noop close flow, cleanup, self-destruct). Cannot write code directly.
 
 Shared: `query_blackboard` (read-only SQL). SDK-provided: `read`, `bash`, `grep`. Hot-reload of skills/prompts/system-prompt is a user-facing `/reload` command (handled directly in `runtime.enqueue()`), not an LLM tool — routing reloads through the LLM wastes tokens.
 
@@ -150,7 +150,7 @@ Features: skill picker (`cmdk`), image attachments (paste/drop/pick, base64), pa
 
 ### Installer
 
-Two standalone ESM scripts (`install.mjs`, `uninstall.mjs`), zero dependencies (`node:*` only). Deploys `~/.flitterbot/`, bootstraps config, installs Claude Code hooks in `~/.claude/settings.json`, optionally installs OS scheduler (`--with-scheduler`). Every change manifest-tracked (SHA-256 checksums, drift detection). Each step shows diff, requires confirmation.
+Two standalone ESM scripts (`install.mjs`, `uninstall.mjs`), zero dependencies (`node:*` only). Deploys `~/.flitterbot/`, bootstraps Codex-first config, optionally installs Claude Code hooks in `~/.claude/settings.json` (`--with-claude-hooks`), and optionally installs OS scheduler (`--with-scheduler`). Every change manifest-tracked (SHA-256 checksums, drift detection). Each step shows diff, requires confirmation.
 
 Installed tree under `~/.flitterbot/`: `config.json`, `blackboard.db`, `logs/`, `bin/`, `hooks/`, `scripts/`, `scheduler/`, `whatsapp/`.
 
@@ -244,7 +244,7 @@ Installer → Blackboard → WhatsApp Channel ──┐
 - **Prompt-driven waves** — Pi coordinates CC session waves through instructions, not infrastructure
 - **Todoist is human-owned** — Pi reads/annotates, never autonomously completes
 - **Permission-gated** — Pi suggests, doesn't execute without approval
-- **Minimal footprint** — only `~/.claude/settings.json` and scheduler entries touched outside `~/.flitterbot/`
+- **Minimal footprint** — fresh installs touch only `~/.flitterbot/`; `~/.claude/settings.json` and scheduler entries are opt-in
 - **Uninstaller-first** — manifest-tracked, drift-detected removal before installation
 
 ## Quick Start

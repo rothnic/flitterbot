@@ -1,14 +1,14 @@
 # Flitterbot
 
-Orchestration runtime for Pi-managed streams with Codex coding workers. Routes WhatsApp/web messages to concurrent Pi orchestrators and, while the downstream runner migration is in progress, can supervise Claude Code sessions in git worktrees.
+Orchestration runtime for Pi-managed streams with Codex coding workers. Routes WhatsApp/web messages to concurrent Pi orchestrators and can optionally ingest legacy Claude Code hook events.
 
 Architecture: [`docs/overview.md`](docs/overview.md). Deep dives: [`docs/<feature>/FEATURE.md`](docs/).
 
 ## Prerequisites
 
-Node.js 22+, pnpm, tmux, Codex CLI signed in with ChatGPT/Codex subscription auth, sqlite3.
+Node.js 22+, pnpm, Codex CLI signed in with ChatGPT/Codex subscription auth, sqlite3.
 
-Claude Code CLI is still required only for the current downstream tmux worker loop. The Codex-native worker migration is tracked in [`docs/codex-subscription-migration/FEATURE.md`](docs/codex-subscription-migration/FEATURE.md).
+Claude Code CLI and tmux are optional legacy integrations. The primary coding-worker path uses Codex app-server.
 
 ## Install
 
@@ -17,13 +17,13 @@ pnpm install && pnpm --dir web install
 cp .env.example .env                    # optional: set GROQ_API_KEY for default classifier
 codex login                             # Codex worker subscription auth
 pnpm exec pi                            # optional: /login -> ChatGPT Plus/Pro (Codex)
-node installer/install.mjs              # deploys ~/.flitterbot/, wires hooks
+node installer/install.mjs              # deploys ~/.flitterbot/
 ~/.flitterbot/bin/flitterbot-up start
 ~/.flitterbot/bin/flitterbot-wa auth    # optional: WhatsApp
 pnpm --dir web dev                      # optional: web UI (:3188)
 ```
 
-Installer flags: `--dry-run` preview, `--with-scheduler` launchd/systemd cron.
+Installer flags: `--dry-run` preview, `--with-scheduler` launchd/systemd cron, `--with-claude-hooks` legacy Claude Code hook ingestion.
 
 ## Config
 
@@ -51,14 +51,14 @@ same subscription-backed provider. Flitterbot prefers a populated
 `~/.flitterbot/control-surface/agent/auth.json` for the target provider, then a
 populated `~/.pi/agent/auth.json` for that provider; empty or unrelated auth
 entries do not shadow populated fallback files. Coding worker execution uses
-real Codex CLI/SDK/app-server auth. `ANTHROPIC_API_KEY` is optional for legacy
-Claude model entries.
+real Codex CLI/SDK/app-server auth. Add Anthropic models and `ANTHROPIC_API_KEY`
+only for explicit legacy Claude orchestration.
 
 Runtime tuning: edit `~/.flitterbot/config.json` — keys are self-describing. The user-facing prompt knobs are:
 
 - `defaultAgentFirstMessage` — first instruction queued when the default agent starts.
 - `newStreamFirstMessageFooter` — footer appended to the first prompt sent to every new stream orchestrator.
-- `tmuxEnabled` — include tmux sub-agent orchestration instructions in orchestrator prompts.
+- `tmuxEnabled` — include legacy tmux sub-agent orchestration instructions in orchestrator prompts. Fresh installs leave this disabled.
 - `extraSkillPaths` — additional skill directories loaded after bundled Flitterbot skills.
 - `learningsNotePath` — Markdown document used by the bundled `learnings` skill.
 - `codexWorkerProfiles` — named Codex app-server worker profiles with model,
@@ -69,7 +69,7 @@ Runtime tuning: edit `~/.flitterbot/config.json` — keys are self-describing. T
   with `local-stdio`; add `ssh-stdio` hosts such as `vps-dev` when the remote
   machine has the repo, dependencies, `codex`, and Codex auth.
 
-Skills load from `~/.claude/skills`, `~/.agents/skills`, bundled `~/.flitterbot/skills`, then `extraSkillPaths`. Flitterbot agent instructions load from `~/.flitterbot/control-surface/agent/AGENTS.md`; the installer creates this file if missing and leaves user edits intact. Tasks are managed through Flitterbot's bundled task API at `~/.flitterbot/data/tasks`; local notes live under `~/.flitterbot/data/notes`.
+Skills load from `~/.claude/skills`, `~/.agents/skills`, bundled `~/.flitterbot/skills`, then `extraSkillPaths`. The `~/.claude/skills` path is legacy compatibility and is not required for Codex workers. Flitterbot agent instructions load from `~/.flitterbot/control-surface/agent/AGENTS.md`; the installer creates this file if missing and leaves user edits intact. Tasks are managed through Flitterbot's bundled task API at `~/.flitterbot/data/tasks`; local notes live under `~/.flitterbot/data/notes`.
 
 ## Commands
 
@@ -81,13 +81,13 @@ pnpm run control-surface                    # run from source
 pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD"
 pnpm run doctor:codex-worker-hosts -- --fresh-local --cwd "$PWD"
 pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
-node ~/.flitterbot/uninstall.mjs [--meta]   # remove hooks+scheduler (+~/.flitterbot/)
+node ~/.flitterbot/uninstall.mjs [--meta]   # remove managed hooks+scheduler (+~/.flitterbot/)
 ```
 
 ## Troubleshooting
 
-- *`flitterbot-up start` fails* — check `~/.flitterbot/config.json`, `control-surface.log`; verify `node`/`claude`/`tmux`/`sqlite3` on PATH.
+- *`flitterbot-up start` fails* — check `~/.flitterbot/config.json`, `control-surface.log`; verify `node`, `codex`, and `sqlite3` on PATH.
 - *`openai-codex` Pi prompts fail with "No API key found"* — Pi does not read `~/.codex/auth.json`; run `pnpm exec pi`, enter `/login`, and select `ChatGPT Plus/Pro (Codex)`. Codex app-server worker execution can still use Codex CLI subscription auth.
 - *WhatsApp auth errors* — re-run `flitterbot-wa auth`.
-- *Hooks not firing* — check `~/.claude/settings.json`, `~/.flitterbot/logs/hooks-errors.log`. Async, 15s timeout.
+- *Legacy Claude hooks not firing* — install with `--with-claude-hooks`, then check `~/.claude/settings.json` and `~/.flitterbot/logs/hooks-errors.log`. Async, 15s timeout.
 - *Runtime restarts after stop* — scheduler installed; run uninstaller.
