@@ -15,7 +15,8 @@ Claude Code CLI is still required only for the current downstream tmux worker lo
 ```bash
 pnpm install && pnpm --dir web install
 cp .env.example .env                    # optional: set GROQ_API_KEY for default classifier
-codex login                             # ChatGPT/Codex subscription auth
+codex login                             # Codex worker subscription auth
+pnpm exec pi                            # optional: /login -> ChatGPT Plus/Pro (Codex)
 node installer/install.mjs              # deploys ~/.flitterbot/, wires hooks
 ~/.flitterbot/bin/flitterbot-up start
 ~/.flitterbot/bin/flitterbot-wa auth    # optional: WhatsApp
@@ -44,9 +45,14 @@ Use `provider: "openai-compatible"` for proxy gateways such as 9router:
 ```
 
 Fresh installs seed an `openai-codex/gpt-5.5` Pi model entry, but Pi's auth
-store is separate from Codex CLI auth. Coding worker execution uses real Codex
-CLI/SDK/app-server auth. `ANTHROPIC_API_KEY` is optional for legacy Claude
-model entries.
+store is separate from Codex CLI auth. Use interactive `pi`, then `/login`, then
+select `ChatGPT Plus/Pro (Codex)` when Pi orchestrator prompts should use the
+same subscription-backed provider. Flitterbot prefers a populated
+`~/.flitterbot/control-surface/agent/auth.json` for the target provider, then a
+populated `~/.pi/agent/auth.json` for that provider; empty or unrelated auth
+entries do not shadow populated fallback files. Coding worker execution uses
+real Codex CLI/SDK/app-server auth. `ANTHROPIC_API_KEY` is optional for legacy
+Claude model entries.
 
 Runtime tuning: edit `~/.flitterbot/config.json` — keys are self-describing. The user-facing prompt knobs are:
 
@@ -81,7 +87,7 @@ node ~/.flitterbot/uninstall.mjs [--meta]   # remove hooks+scheduler (+~/.flitte
 ## Troubleshooting
 
 - *`flitterbot-up start` fails* — check `~/.flitterbot/config.json`, `control-surface.log`; verify `node`/`claude`/`tmux`/`sqlite3` on PATH.
-- *`openai-codex` Pi prompts fail with "No API key found"* — Pi does not read `~/.codex/auth.json`; use Pi provider login for orchestrator prompts. Codex app-server worker execution can still use Codex CLI subscription auth.
+- *`openai-codex` Pi prompts fail with "No API key found"* — Pi does not read `~/.codex/auth.json`; run `pnpm exec pi`, enter `/login`, and select `ChatGPT Plus/Pro (Codex)`. Codex app-server worker execution can still use Codex CLI subscription auth.
 - *WhatsApp auth errors* — re-run `flitterbot-wa auth`.
 - *Hooks not firing* — check `~/.claude/settings.json`, `~/.flitterbot/logs/hooks-errors.log`. Async, 15s timeout.
 - *Runtime restarts after stop* — scheduler installed; run uninstaller.

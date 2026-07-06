@@ -163,13 +163,13 @@ function modelThinkingCapabilities(model: Model<Api>) {
 async function resolveProviderAvailability(
   runtime: ControlSurfaceRuntime,
 ): Promise<Map<string, ModelListItem["authKind"]>> {
-  const authStorage = createPiAuthStorage(runtime.config.controlSurfaceAgentDir);
   const providers = new Set([
     ...getBuiltinProviders(),
     ...runtime.config.models.map((model) => model.provider),
   ]);
   const entries = await Promise.all(
     [...providers].map(async (provider) => {
+      const authStorage = createPiAuthStorage(runtime.config.controlSurfaceAgentDir, provider);
       const apiKey = await authStorage.getApiKey(provider);
       const credential = authStorage.get(provider);
       const authKind: ModelListItem["authKind"] = apiKey

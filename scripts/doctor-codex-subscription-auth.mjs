@@ -142,28 +142,10 @@ function run(command, args, options = {}) {
   }
 }
 
-function readJsonShape(filePath) {
-  if (!fs.existsSync(filePath)) return { exists: false, topLevelKeys: [], providerKeys: [] };
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    const topLevelKeys = parsed && typeof parsed === "object" ? Object.keys(parsed) : [];
-    const providerKeys =
-      parsed?.providers && typeof parsed.providers === "object" ? Object.keys(parsed.providers) : [];
-    return { exists: true, topLevelKeys, providerKeys };
-  } catch (error) {
-    return {
-      exists: true,
-      topLevelKeys: [],
-      providerKeys: [],
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
 function hasPiProviderAuth(shapes, provider) {
   return shapes.some((shape) => {
-    const keys = [...shape.topLevelKeys, ...shape.providerKeys].map((key) => key.toLowerCase());
-    return keys.some((key) => key === provider.toLowerCase() || key.includes(provider.toLowerCase()));
+    const keys = shape.credentialProviderKeys.map((key) => key.toLowerCase());
+    return keys.some((key) => key === provider.toLowerCase());
   });
 }
 
@@ -214,6 +196,7 @@ async function main() {
   }
 
   const { loadConfig } = await import("../src/config/load-config.ts");
+  const { readPiAuthFileShape, selectPiAuthPath } = await import("../src/pi-auth.ts");
   const config = loadConfig();
   const codexVersion = run("codex", ["--version"]);
   const codexLogin = run("codex", ["login", "status"], {
@@ -226,12 +209,21 @@ async function main() {
   ];
   const piAuthFiles = piAuthPaths.map((filePath) => ({
     path: filePath,
-    ...readJsonShape(filePath),
+    ...readPiAuthFileShape(filePath),
   }));
   const orchestratorProvider = defaultModelProvider(config);
+  const resolvedPiAuthPath = selectPiAuthPath(
+    config.controlSurfaceAgentDir,
+    piAuthPaths[0],
+    orchestratorProvider ?? undefined,
+  );
+  const resolvedPiAuthFile = {
+    path: resolvedPiAuthPath,
+    ...readPiAuthFileShape(resolvedPiAuthPath),
+  };
   const piProviderReady =
     orchestratorProvider === "openai-codex"
-      ? hasPiProviderAuth(piAuthFiles, "openai-codex")
+      ? hasPiProviderAuth([resolvedPiAuthFile], "openai-codex")
       : true;
   const classifier = classifierStatus(config, piProviderReady);
   const report = {
@@ -245,10 +237,12 @@ async function main() {
     piOrchestrator: {
       provider: orchestratorProvider,
       ready: piProviderReady,
+      resolvedAuthPath: resolvedPiAuthPath,
+      resolvedAuthFile: resolvedPiAuthFile,
       authFiles: piAuthFiles,
       reason: piProviderReady
         ? "Pi provider auth present or default provider does not require openai-codex Pi auth"
-        : "Pi openai-codex provider auth is missing; Codex CLI auth does not satisfy Pi provider auth",
+        : "Pi openai-codex provider auth is missing; Codex CLI auth does not satisfy Pi provider auth. Run pi interactively, use /login, and select ChatGPT Plus/Pro (Codex).",
     },
     classifier,
     decision: {

@@ -93,7 +93,10 @@ async function callPiClassifier(
     );
   }
 
-  const authStorage = createPiAuthStorage(runtimeConfig.controlSurfaceAgentDir);
+  const authStorage = createPiAuthStorage(
+    runtimeConfig.controlSurfaceAgentDir,
+    modelEntry.provider,
+  );
   const modelRegistry = createPiModelRegistry(authStorage, runtimeConfig.controlSurfaceAgentDir);
   const auth = await modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok || !auth.apiKey) {
