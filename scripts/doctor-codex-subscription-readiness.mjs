@@ -144,6 +144,7 @@ function main() {
   );
   steps.push(runStep("classifierProviderConfigs", node, ["scripts/e2e-classifier-provider-configs.mjs"]));
   steps.push(runStep("codexFirstInstallDefaults", node, ["scripts/e2e-codex-first-install-defaults.mjs"]));
+  steps.push(runStep("workerHostConfigure", node, ["scripts/e2e-worker-host-configure.mjs"]));
   steps.push(
     runStep("workerHostScheduler", node, [
       "--experimental-strip-types",

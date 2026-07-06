@@ -95,10 +95,10 @@ pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --strict --full-loc
   9router-style base URL, and Pi provider-auth-present/missing cases.
 - `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"` passed in
   report mode and produced one JSON readiness summary for auth, classifier
-  provider configs, Codex-first install defaults, host scheduler, worker UI
-  visibility, and Pi provider-auth readiness. Report mode requires Codex worker
-  auth but does not run the live Pi harness unless `--live-pi-harness` is
-  passed.
+  provider configs, Codex-first install defaults, worker-host config, host
+  scheduler, worker UI visibility, and Pi provider-auth readiness. Report mode
+  requires Codex worker auth but does not run the live Pi harness unless
+  `--live-pi-harness` is passed.
 
 ## Remaining Operator Action
 

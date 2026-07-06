@@ -267,6 +267,7 @@ pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD" --timeout-ms 180000
 pnpm run e2e:live-pi-orchestrator-codex-worker -- --cwd "$PWD" --allow-missing-pi-auth
 pnpm run e2e:worker-ui-visibility -- --cwd "$PWD"
 pnpm run e2e:codex-worker-host-scheduler
+pnpm run e2e:worker-host-configure
 pnpm run e2e:codex-first-install-defaults
 pnpm run e2e:classifier-provider-configs
 pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
@@ -320,6 +321,9 @@ Verified on 2026-07-06:
 - `pnpm run e2e:codex-worker-host-scheduler` proves capacity-aware local/remote
   worker host selection, explicit host override, reservation, stale-heartbeat
   exclusion, and unreachable-host exclusion.
+- `pnpm run e2e:worker-host-configure` proves the operator command for adding
+  and updating `vps-dev`/`vps-gw` style SSH worker hosts without hand-editing
+  `workerHosts` JSON.
 - `pnpm run e2e:codex-first-install-defaults` proves fresh installs are
   Codex-first and Claude hooks are legacy opt-in or preserved only when already
   managed.

@@ -67,6 +67,9 @@ Example SSH host:
 ## Validation
 
 ```bash
+pnpm run e2e:worker-host-configure
+pnpm run worker-host:configure -- --id vps-dev --ssh-target vps-dev --projects-root ~/data/projects --max-concurrent-workers 4 --role high-memory --auto-select
+pnpm run worker-host:configure -- --id vps-gw --ssh-target vps-gw --projects-root ~/data/projects --role gateway
 pnpm run doctor:codex-worker-hosts -- --fresh-local --cwd "$PWD"
 pnpm run doctor:codex-worker-hosts
 pnpm run doctor:codex-worker-hosts -- --allow-unreachable
@@ -78,6 +81,8 @@ pnpm run audit
 ## Definition Of Done
 
 - `workerHosts` is accepted and validated by config loading.
+- `pnpm run worker-host:configure` can add or update local/SSH worker hosts in
+  config without hand-editing JSON.
 - Installer-created configs include a local worker host.
 - Runtime startup syncs configured hosts into `worker_hosts`.
 - `pnpm run doctor:codex-worker-hosts` checks local `codex --version` and
@@ -110,3 +115,7 @@ reconnects to the recorded host before resuming stored `thread_id` values.
 - The SSH run started Codex app-server through SSH stdio, completed launch and
   follow-up turns, wrote 42 worker events, and routed two worker completion
   messages back into the local stream.
+- `pnpm run e2e:worker-host-configure` passed against a temporary config and
+  proved adding `vps-dev`, adding `vps-gw`, updating `vps-dev` capacity and
+  scheduler flags, preserving existing capabilities, dry-run non-persistence,
+  and `loadConfig()` compatibility for the resulting `workerHosts`.

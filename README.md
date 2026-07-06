@@ -56,7 +56,7 @@ only for explicit legacy Claude orchestration.
 
 Run `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD"` for one JSON
 summary of the Codex worker, classifier, install-default, host-scheduler, UI,
-and Pi auth readiness checks. After Pi `/login`, add `--strict
+worker-host config, and Pi auth readiness checks. After Pi `/login`, add `--strict
 --full-local-worker` to require the full live subscription path.
 
 Runtime tuning: edit `~/.flitterbot/config.json` — keys are self-describing. The user-facing prompt knobs are:
@@ -72,7 +72,12 @@ Runtime tuning: edit `~/.flitterbot/config.json` — keys are self-describing. T
   (`gpt-5.4-mini`).
 - `workerHosts` — local or remote machines that can run Codex workers. Start
   with `local-stdio`; add `ssh-stdio` hosts such as `vps-dev` when the remote
-  machine has the repo, dependencies, `codex`, and Codex auth.
+  machine has the repo, dependencies, `codex`, and Codex auth:
+
+```bash
+pnpm run worker-host:configure -- --id vps-dev --ssh-target vps-dev --projects-root ~/data/projects --max-concurrent-workers 4 --role high-memory --auto-select
+pnpm run worker-host:configure -- --id vps-gw --ssh-target vps-gw --projects-root ~/data/projects --role gateway
+```
 
 Skills load from `~/.claude/skills`, `~/.agents/skills`, bundled `~/.flitterbot/skills`, then `extraSkillPaths`. The `~/.claude/skills` path is legacy compatibility and is not required for Codex workers. Flitterbot agent instructions load from `~/.flitterbot/control-surface/agent/AGENTS.md`; the installer creates this file if missing and leaves user edits intact. Tasks are managed through Flitterbot's bundled task API at `~/.flitterbot/data/tasks`; local notes live under `~/.flitterbot/data/notes`.
 
@@ -84,6 +89,7 @@ Skills load from `~/.claude/skills`, `~/.agents/skills`, bundled `~/.flitterbot/
 pnpm --dir web dev                          # web UI
 pnpm run control-surface                    # run from source
 pnpm run e2e:codex-worker-control-plane -- --cwd "$PWD"
+pnpm run worker-host:configure -- --id vps-dev --ssh-target vps-dev --projects-root ~/data/projects --max-concurrent-workers 4 --role high-memory --auto-select
 pnpm run doctor:codex-worker-hosts -- --fresh-local --cwd "$PWD"
 pnpm run doctor:codex-subscription-auth -- --fresh-local --cwd "$PWD" --report-only
 node ~/.flitterbot/uninstall.mjs [--meta]   # remove managed hooks+scheduler (+~/.flitterbot/)
