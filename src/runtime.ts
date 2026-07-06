@@ -110,7 +110,7 @@ import {
   startCodexWorker,
   startCodexWorkerFollowUp,
 } from "./workers/codex-worker-runner.ts";
-import { syncConfiguredWorkerHosts } from "./workers/worker-hosts.ts";
+import { selectCodexWorkerHost, syncConfiguredWorkerHosts } from "./workers/worker-hosts.ts";
 import { type WebSocketClient, WebSocketHub } from "./ws/hub.ts";
 
 // ponytail: prefer the SDK's tool definition type here instead of maintaining a local mirror.
@@ -162,6 +162,7 @@ export class ControlSurfaceRuntime {
   private maintenanceTimer?: NodeJS.Timeout;
   private whatsappStatusWatcher?: fs.FSWatcher;
   private readonly activeCodexWorkers = new Map<string, ActiveCodexWorker>();
+  private readonly codexWorkerHostReservations = new Map<string, number>();
   private whatsappStatusCache: {
     status: ControlSurfaceWhatsAppStatus;
     pid?: number;
@@ -1767,6 +1768,27 @@ export class ControlSurfaceRuntime {
     return host;
   }
 
+  private reserveCodexWorkerHost(hostId?: string): WorkerHostConfig {
+    const selection = selectCodexWorkerHost(this.blackboard, this.config, {
+      requestedHostId: hostId,
+      reservedSessionCounts: this.codexWorkerHostReservations,
+    });
+    this.codexWorkerHostReservations.set(
+      selection.host.id,
+      (this.codexWorkerHostReservations.get(selection.host.id) ?? 0) + 1,
+    );
+    return selection.host;
+  }
+
+  private releaseCodexWorkerHostReservation(hostId: string): void {
+    const current = this.codexWorkerHostReservations.get(hostId) ?? 0;
+    if (current <= 1) {
+      this.codexWorkerHostReservations.delete(hostId);
+      return;
+    }
+    this.codexWorkerHostReservations.set(hostId, current - 1);
+  }
+
   private resolveCodexWorkerCwd(
     streamId: string | undefined,
     cwd?: string,
@@ -1862,39 +1884,46 @@ export class ControlSurfaceRuntime {
     const stream = targetStreamId ? getStreamById(this.blackboard, targetStreamId) : null;
     if (targetStreamId && !stream) throw new Error(`Stream not found: ${targetStreamId}`);
     if (stream && stream.status !== "open") throw new Error(`Stream is closed: ${stream.name}`);
-    const workerHost = this.resolveCodexWorkerHost(input.workerHostId);
-    const cwd = this.resolveCodexWorkerCwd(targetStreamId, input.cwd, workerHost);
-    if (!workerHost || workerHost.connectionMode === "local-stdio") {
-      if (!fs.existsSync(cwd)) throw new Error(`Codex worker cwd does not exist: ${cwd}`);
+    const workerHost = this.reserveCodexWorkerHost(input.workerHostId);
+    let handle: CodexWorkerRunHandle | undefined;
+    try {
+      const cwd = this.resolveCodexWorkerCwd(targetStreamId, input.cwd, workerHost);
+      if (workerHost.connectionMode === "local-stdio") {
+        if (!fs.existsSync(cwd)) throw new Error(`Codex worker cwd does not exist: ${cwd}`);
+      }
+      const profile = resolveCodexWorkerProfile(this.config, input.profileId);
+      const managed = targetStreamId ? this.sessionManager.getByStream(targetStreamId) : undefined;
+      handle = await startCodexWorker({
+        db: this.blackboard,
+        cwd,
+        prompt: input.prompt,
+        streamId: targetStreamId,
+        piSessionId: managed?.piSessionId,
+        profile,
+        context: input.context,
+        workerHost,
+      });
+      this.releaseCodexWorkerHostReservation(workerHost.id);
+      this.registerActiveCodexWorker({
+        handle,
+        streamId: targetStreamId,
+        streamName: stream?.name,
+      });
+      return {
+        workerSessionId: handle.workerSessionId,
+        workerTurnId: handle.workerTurnId,
+        threadId: handle.threadId,
+        turnId: handle.turnId,
+        profileId: profile.id,
+        workerHostId: workerHost.id,
+        cwd,
+        streamId: targetStreamId,
+        streamName: stream?.name,
+      };
+    } catch (error) {
+      this.releaseCodexWorkerHostReservation(workerHost.id);
+      throw error;
     }
-    const profile = resolveCodexWorkerProfile(this.config, input.profileId);
-    const managed = targetStreamId ? this.sessionManager.getByStream(targetStreamId) : undefined;
-    const handle = await startCodexWorker({
-      db: this.blackboard,
-      cwd,
-      prompt: input.prompt,
-      streamId: targetStreamId,
-      piSessionId: managed?.piSessionId,
-      profile,
-      context: input.context,
-      workerHost,
-    });
-    this.registerActiveCodexWorker({
-      handle,
-      streamId: targetStreamId,
-      streamName: stream?.name,
-    });
-    return {
-      workerSessionId: handle.workerSessionId,
-      workerTurnId: handle.workerTurnId,
-      threadId: handle.threadId,
-      turnId: handle.turnId,
-      profileId: profile.id,
-      workerHostId: workerHost?.id ?? "local",
-      cwd,
-      streamId: targetStreamId,
-      streamName: stream?.name,
-    };
   }
 
   private async followUpCodexWorkerTask(input: {
@@ -2506,7 +2535,7 @@ export class ControlSurfaceRuntime {
             worker_host: {
               type: "string",
               description:
-                "Optional worker host id from config.workerHosts, such as local or vps-gw. Defaults to local.",
+                "Optional worker host id from config.workerHosts, such as local or vps-gw. If omitted, Flitterbot selects a configured host by capacity: local first, then ready remote hosts that opt into auto-selection.",
             },
             context: {
               type: "string",

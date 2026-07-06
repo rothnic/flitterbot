@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import type { BlackboardDatabase } from "../blackboard/db.ts";
 import {
+  getWorkerHost,
+  getWorkerHostActiveSessionCount,
   listWorkerHosts,
   updateWorkerHostStatus,
   upsertWorkerHost,
@@ -20,6 +22,22 @@ export type WorkerHostCheckResult = {
   authStatus?: string;
   error?: string;
 };
+
+export type WorkerHostSelection = {
+  host: WorkerHostConfig;
+  activeSessions: number;
+  reservedSessions: number;
+  maxConcurrentWorkers: number;
+  reason: "explicit" | "local-default" | "remote-auto";
+};
+
+export type WorkerHostSelectionOptions = {
+  requestedHostId?: string;
+  reservedSessionCounts?: ReadonlyMap<string, number> | Record<string, number>;
+  remoteHeartbeatMaxAgeMs?: number;
+};
+
+const DEFAULT_REMOTE_HEARTBEAT_MAX_AGE_MS = 10 * 60 * 1000;
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -88,6 +106,142 @@ export function syncConfiguredWorkerHosts(
     });
   }
   return listWorkerHosts(db);
+}
+
+function isRemoteAutoSelectable(host: WorkerHostConfig): boolean {
+  return host.capabilities.autoSelect === true || host.capabilities.scheduler === "auto";
+}
+
+function isSchedulingEligible(row: WorkerHostRow | null): boolean {
+  return !row || row.status === "ready" || row.status === "unknown" || row.status === "busy";
+}
+
+function reservedSessionCount(
+  reserved: WorkerHostSelectionOptions["reservedSessionCounts"],
+  hostId: string,
+): number {
+  if (!reserved) return 0;
+  const maybeMap = reserved as ReadonlyMap<string, number>;
+  if (typeof maybeMap.get === "function") return maybeMap.get(hostId) ?? 0;
+  return (reserved as Record<string, number>)[hostId] ?? 0;
+}
+
+function isFreshHeartbeat(row: WorkerHostRow, nowMs: number, maxAgeMs: number): boolean {
+  if (!row.last_heartbeat_at) return false;
+  const heartbeatMs = Date.parse(row.last_heartbeat_at);
+  return Number.isFinite(heartbeatMs) && nowMs - heartbeatMs <= maxAgeMs;
+}
+
+function isRemoteSchedulingEligible(
+  row: WorkerHostRow | null,
+  nowMs: number,
+  maxAgeMs: number,
+): row is WorkerHostRow {
+  return (
+    !!row &&
+    (row.status === "ready" || row.status === "busy") &&
+    isFreshHeartbeat(row, nowMs, maxAgeMs)
+  );
+}
+
+function hostCapacity(
+  db: BlackboardDatabase,
+  host: WorkerHostConfig,
+  reservedCounts?: WorkerHostSelectionOptions["reservedSessionCounts"],
+): {
+  activeSessions: number;
+  reservedSessions: number;
+  maxConcurrentWorkers: number;
+  hasCapacity: boolean;
+} {
+  const activeSessions = getWorkerHostActiveSessionCount(db, host.id);
+  const reservedSessions = reservedSessionCount(reservedCounts, host.id);
+  const maxConcurrentWorkers = host.maxConcurrentWorkers;
+  return {
+    activeSessions,
+    reservedSessions,
+    maxConcurrentWorkers,
+    hasCapacity: activeSessions + reservedSessions < maxConcurrentWorkers,
+  };
+}
+
+export function selectCodexWorkerHost(
+  db: BlackboardDatabase,
+  config: Pick<FlitterbotConfig, "workerHosts">,
+  options: string | WorkerHostSelectionOptions = {},
+): WorkerHostSelection {
+  const selectionOptions = typeof options === "string" ? { requestedHostId: options } : options;
+  const remoteHeartbeatMaxAgeMs =
+    selectionOptions.remoteHeartbeatMaxAgeMs ?? DEFAULT_REMOTE_HEARTBEAT_MAX_AGE_MS;
+  const nowMs = Date.now();
+  const requestedHostId = selectionOptions.requestedHostId;
+  const requested = requestedHostId?.trim();
+  if (requested) {
+    const host = config.workerHosts.find((candidate) => candidate.id === requested);
+    if (!host) throw new Error(`Unknown worker host: ${requestedHostId}`);
+    const capacity = hostCapacity(db, host, selectionOptions.reservedSessionCounts);
+    return {
+      host,
+      activeSessions: capacity.activeSessions,
+      reservedSessions: capacity.reservedSessions,
+      maxConcurrentWorkers: capacity.maxConcurrentWorkers,
+      reason: "explicit",
+    };
+  }
+
+  const local = config.workerHosts.find((host) => host.connectionMode === "local-stdio");
+  if (local) {
+    const row = getWorkerHost(db, local.id);
+    const capacity = hostCapacity(db, local, selectionOptions.reservedSessionCounts);
+    if (isSchedulingEligible(row) && capacity.hasCapacity) {
+      return {
+        host: local,
+        activeSessions: capacity.activeSessions,
+        reservedSessions: capacity.reservedSessions,
+        maxConcurrentWorkers: capacity.maxConcurrentWorkers,
+        reason: "local-default",
+      };
+    }
+  }
+
+  const remoteCandidates = config.workerHosts
+    .filter((host) => host.connectionMode !== "local-stdio" && isRemoteAutoSelectable(host))
+    .map((host) => {
+      const row = getWorkerHost(db, host.id);
+      const capacity = hostCapacity(db, host, selectionOptions.reservedSessionCounts);
+      return { host, row, ...capacity };
+    })
+    .filter(
+      (candidate) =>
+        isRemoteSchedulingEligible(candidate.row, nowMs, remoteHeartbeatMaxAgeMs) &&
+        candidate.hasCapacity,
+    )
+    .sort((a, b) => {
+      const aRemaining = a.maxConcurrentWorkers - a.activeSessions - a.reservedSessions;
+      const bRemaining = b.maxConcurrentWorkers - b.activeSessions - b.reservedSessions;
+      return bRemaining - aRemaining || a.host.id.localeCompare(b.host.id);
+    });
+
+  const selected = remoteCandidates[0];
+  if (selected) {
+    return {
+      host: selected.host,
+      activeSessions: selected.activeSessions,
+      reservedSessions: selected.reservedSessions,
+      maxConcurrentWorkers: selected.maxConcurrentWorkers,
+      reason: "remote-auto",
+    };
+  }
+
+  const localCapacity = local
+    ? hostCapacity(db, local, selectionOptions.reservedSessionCounts)
+    : null;
+  const localPart = local
+    ? `${local.id} has ${(localCapacity?.activeSessions ?? 0) + (localCapacity?.reservedSessions ?? 0)}/${local.maxConcurrentWorkers} active or reserved workers`
+    : "no local worker host is configured";
+  throw new Error(
+    `No available Codex worker host: ${localPart}, and no ready fresh remote host has opted into auto-selection`,
+  );
 }
 
 export function checkConfiguredWorkerHost(

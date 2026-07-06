@@ -3,6 +3,7 @@ import path from "node:path";
 import type { BlackboardDatabase } from "../blackboard/db.ts";
 import {
   appendWorkerEvent,
+  getWorkerHost,
   getWorkerSession,
   getWorkerTurn,
   insertWorkerSession,
@@ -121,6 +122,7 @@ function remoteShellValue(value: string): string {
 }
 
 function upsertConfiguredHost(db: BlackboardDatabase, host: WorkerHostConfig): void {
+  if (getWorkerHost(db, host.id)) return;
   upsertWorkerHost(db, {
     hostId: host.id,
     displayName: host.displayName,
@@ -129,7 +131,7 @@ function upsertConfiguredHost(db: BlackboardDatabase, host: WorkerHostConfig): v
     projectsRoot: host.projectsRoot,
     codexHome: host.codexHome,
     maxConcurrentWorkers: host.maxConcurrentWorkers,
-    status: "ready",
+    status: "unknown",
     capabilities: host.capabilities,
   });
 }

@@ -10,6 +10,7 @@
   "e2e:codex-worker-control-plane": "node --experimental-strip-types scripts/e2e-codex-worker-control-plane.mjs",
   "e2e:live-pi-orchestrator-codex-worker": "node --experimental-strip-types scripts/e2e-live-pi-orchestrator-codex-worker.mjs",
   "e2e:worker-ui-visibility": "node --experimental-strip-types scripts/e2e-worker-ui-visibility.mjs",
+  "e2e:codex-worker-host-scheduler": "node --experimental-strip-types scripts/e2e-codex-worker-host-scheduler.mjs",
   "doctor:codex-worker-hosts": "node --experimental-strip-types scripts/check-codex-worker-hosts.mjs",
   "doctor:codex-subscription-auth": "node --experimental-strip-types scripts/doctor-codex-subscription-auth.mjs",
   "web:dev": "pnpm --dir web run dev",
@@ -17,7 +18,7 @@
     "audit": "pnpm run audit:ts && pnpm run audit:shell",
     "audit:ts": "biome check src/ web/src/ && tsc --noEmit && tsc --noEmit -p web/tsconfig.json && knip --include files,dependencies,unlisted --exclude binaries --no-config-hints && knip --directory web --include files,dependencies,unlisted --exclude binaries --no-config-hints",
     "audit:ts:fix": "biome check --fix src/ web/src/ && pnpm run audit:ts",
-  "audit:shell": "find installer -type f \\( -name '*.sh' -o -path 'installer/bin/flitterbot-up' -o -path 'installer/bin/flitterbot-wa' \\) -print0 | xargs -0 -n1 bash -n && node --check installer/install.mjs && node --check installer/uninstall.mjs && node --check scripts/smoke-codex-worker.mjs && node --check scripts/e2e-codex-worker-control-plane.mjs && node --check scripts/e2e-live-pi-orchestrator-codex-worker.mjs && node --check scripts/e2e-worker-ui-visibility.mjs && node --check scripts/check-codex-worker-hosts.mjs && node --check scripts/doctor-codex-subscription-auth.mjs",
+  "audit:shell": "find installer -type f \\( -name '*.sh' -o -path 'installer/bin/flitterbot-up' -o -path 'installer/bin/flitterbot-wa' \\) -print0 | xargs -0 -n1 bash -n && node --check installer/install.mjs && node --check installer/uninstall.mjs && node --check scripts/smoke-codex-worker.mjs && node --check scripts/e2e-codex-worker-control-plane.mjs && node --check scripts/e2e-live-pi-orchestrator-codex-worker.mjs && node --check scripts/e2e-worker-ui-visibility.mjs && node --check scripts/e2e-codex-worker-host-scheduler.mjs && node --check scripts/check-codex-worker-hosts.mjs && node --check scripts/doctor-codex-subscription-auth.mjs",
     "up:latest": "pnpm update $(jq -r '(.dependencies // {}) + (.devDependencies // {}) | to_entries[] | select(.value == \"latest\") | .key' package.json)"
   },
   "devDependencies": {

@@ -92,9 +92,10 @@ pnpm run audit
 
 ## Future Extension
 
-The next remote execution slice should add scheduling policy: host selection by
-capacity/capability, repo/worktree mapping, and restart recovery that reconnects
-to the recorded host before resuming stored `thread_id` values.
+The first scheduling slice is tracked in
+[`007-worker-host-scheduler.md`](007-worker-host-scheduler.md). Remaining
+remote execution extensions are repo/worktree mapping and restart recovery that
+reconnects to the recorded host before resuming stored `thread_id` values.
 
 ## Verified Evidence
 

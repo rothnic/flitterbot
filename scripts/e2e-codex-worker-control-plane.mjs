@@ -14,6 +14,7 @@ function parseArgs(argv) {
     workerHost: "local",
     keep: false,
     includeCancel: true,
+    omitWorkerHost: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -43,6 +44,8 @@ function parseArgs(argv) {
       opts.keep = true;
     } else if (arg === "--skip-cancel") {
       opts.includeCancel = false;
+    } else if (arg === "--omit-worker-host") {
+      opts.omitWorkerHost = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -78,6 +81,7 @@ Options:
   --worker-cwd <path>  Worker cwd on the target host. Default: --cwd
   --timeout-ms <ms>    Completion timeout. Default: ${DEFAULT_TIMEOUT_MS}
   --skip-cancel        Skip active cancel proof
+  --omit-worker-host   Omit worker_host from launch calls to test scheduler defaulting
   --keep               Keep the temp HOME for inspection`);
 }
 
@@ -246,13 +250,14 @@ async function main() {
     const followup = requireTool(tools, "send_codex_worker_followup");
     const cancel = requireTool(tools, "cancel_codex_worker");
 
-    const launchResult = await executeTool(launch, {
+    const launchParams = {
       profile: opts.profile,
-      worker_host: opts.workerHost,
       cwd: opts.workerCwd,
       prompt: "Reply exactly: flitterbot-e2e-ok",
       context: "This is the fresh runtime Codex worker control-plane proof.",
-    });
+    };
+    if (!opts.omitWorkerHost) launchParams.worker_host = opts.workerHost;
+    const launchResult = await executeTool(launch, launchParams);
     const launched = launchResult.details;
     assert(launched?.workerSessionId, "launch_codex_worker did not return workerSessionId");
 
@@ -268,6 +273,10 @@ async function main() {
     );
     assert(initialSession?.stream_id === stream.id, "worker session is not linked to the stream");
     assert(initialSession?.runner_type === "codex_app_server", "worker did not use app-server");
+    assert(
+      initialSession?.host_id === launched.workerHostId,
+      `worker session host ${initialSession?.host_id} did not match launch host ${launched.workerHostId}`,
+    );
     assert(initialTurns.length === 1, "initial worker should have exactly one turn");
     assert(
       latest(initialTurns).final_output?.trim() === "flitterbot-e2e-ok",
@@ -303,17 +312,23 @@ async function main() {
       const rows = messages.getMessagesByWorkstream(runtime.blackboard, stream.id, 50);
       return rows.find((row) => row.content.includes("flitterbot-e2e-followup-ok")) ?? null;
     });
+    const followedUpSession = workers.getWorkerSession(runtime.blackboard, launched.workerSessionId);
+    assert(
+      followedUpSession?.host_id === launched.workerHostId,
+      `follow-up changed worker host from ${launched.workerHostId} to ${followedUpSession?.host_id}`,
+    );
 
     let cancelProof = null;
     if (opts.includeCancel) {
-      const cancelLaunchResult = await executeTool(launch, {
+      const cancelLaunchParams = {
         profile: opts.profile,
-        worker_host: opts.workerHost,
         cwd: opts.workerCwd,
         prompt:
           'Run this shell command first, then reply exactly: flitterbot-e2e-cancel-missed\n\nnode -e "setTimeout(() => {}, 60000)"',
         context: "This worker exists only to prove active cancellation through the runtime tool.",
-      });
+      };
+      if (!opts.omitWorkerHost) cancelLaunchParams.worker_host = opts.workerHost;
+      const cancelLaunchResult = await executeTool(launch, cancelLaunchParams);
       const cancelTarget = cancelLaunchResult.details;
       assert(cancelTarget?.workerSessionId, "cancel launch did not return workerSessionId");
       await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -355,7 +370,8 @@ async function main() {
       configPath,
       blackboardPath: runtime.config.blackboardPath,
       streamId: stream.id,
-      workerHost: opts.workerHost,
+      workerHost: launched.workerHostId,
+      omittedWorkerHost: opts.omitWorkerHost,
       workerCwd: opts.workerCwd,
       workerSessionId: launched.workerSessionId,
       threadId: launched.threadId,

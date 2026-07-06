@@ -83,6 +83,17 @@ export function listWorkerHosts(db: BlackboardDatabase): WorkerHostRow[] {
   );
 }
 
+export function getWorkerHostActiveSessionCount(db: BlackboardDatabase, hostId: string): number {
+  const row = db.get<{ count: number }>(
+    `SELECT COUNT(*) AS count
+     FROM worker_sessions
+     WHERE host_id = ?
+       AND status IN ('starting', 'running', 'waiting_for_user')`,
+    hostId,
+  );
+  return row?.count ?? 0;
+}
+
 export function updateWorkerHostStatus(
   db: BlackboardDatabase,
   hostId: string,
