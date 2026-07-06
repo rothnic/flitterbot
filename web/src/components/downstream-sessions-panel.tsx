@@ -109,6 +109,7 @@ function sessionDescription(session: DownstreamSessionItem): string {
 }
 
 function workerLabel(worker: WorkerSessionItem): string {
+  if (worker.profileId && worker.modelId) return `${worker.profileId} · ${worker.modelId}`;
   return worker.profileId ?? worker.modelId ?? worker.runnerType.replaceAll("_", " ");
 }
 

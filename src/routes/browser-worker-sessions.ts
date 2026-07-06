@@ -11,7 +11,7 @@ import type {
   WorkerTurnStatus,
 } from "../contracts/index.ts";
 import type { ControlSurfaceRuntime } from "../runtime.ts";
-import { sendJson } from "./_shared.ts";
+import { requireBearer, sendJson } from "./_shared.ts";
 
 type BrowserWorkerTurnItem = {
   workerTurnId: string;
@@ -61,10 +61,13 @@ function parseProfileId(metadataJson: string | null): string | null {
 
 export async function handleBrowserWorkerSessionsRoute(
   runtime: ControlSurfaceRuntime,
-  _request: http.IncomingMessage,
+  request: http.IncomingMessage,
   response: http.ServerResponse,
   streamId: string,
 ) {
+  if (!requireBearer(request, runtime.config.controlSurfaceToken)) {
+    return sendJson(response, 401, { ok: false, error: "unauthorized" });
+  }
   const sessions = listWorkerSessionsByStream(runtime.blackboard, streamId, 20);
   const items: BrowserWorkerSessionItem[] = sessions.map((session) => {
     const host = session.host_id ? getWorkerHost(runtime.blackboard, session.host_id) : null;

@@ -7,6 +7,7 @@ process.on("warning", (warning) => {
 });
 
 import http from "node:http";
+import { pathToFileURL } from "node:url";
 import {
   CONTROL_SURFACE_ENDPOINTS,
   type HookRouteEventName,
@@ -55,26 +56,28 @@ import { errorDetail, errorMessage, formatStartupFailure } from "./startup-error
 
 let runtime: ControlSurfaceRuntime | undefined;
 
-process.on("SIGTERM", () => {
-  void runtime?.stop("sigterm").finally(() => process.exit(0));
-  if (!runtime) process.exit(0);
-});
-process.on("SIGINT", () => {
-  void runtime?.stop("sigint").finally(() => process.exit(0));
-  if (!runtime) process.exit(0);
-});
-process.on("uncaughtException", (error) => {
-  console.error(errorDetail(error));
-  void runtime?.stop("uncaught_exception", true).finally(() => process.exit(1));
-  if (!runtime) process.exit(1);
-});
-process.on("unhandledRejection", (error) => {
-  console.error(errorDetail(error));
-  void runtime?.stop("unhandled_rejection", true).finally(() => process.exit(1));
-  if (!runtime) process.exit(1);
-});
+function installProcessHandlers(): void {
+  process.on("SIGTERM", () => {
+    void runtime?.stop("sigterm").finally(() => process.exit(0));
+    if (!runtime) process.exit(0);
+  });
+  process.on("SIGINT", () => {
+    void runtime?.stop("sigint").finally(() => process.exit(0));
+    if (!runtime) process.exit(0);
+  });
+  process.on("uncaughtException", (error) => {
+    console.error(errorDetail(error));
+    void runtime?.stop("uncaught_exception", true).finally(() => process.exit(1));
+    if (!runtime) process.exit(1);
+  });
+  process.on("unhandledRejection", (error) => {
+    console.error(errorDetail(error));
+    void runtime?.stop("unhandled_rejection", true).finally(() => process.exit(1));
+    if (!runtime) process.exit(1);
+  });
+}
 
-try {
+async function main(): Promise<void> {
   runtime = new ControlSurfaceRuntime();
   const activeRuntime = runtime;
   const server = createServer(activeRuntime);
@@ -90,15 +93,22 @@ try {
       );
     },
   );
-} catch (error) {
-  console.error(formatStartupFailure(error));
-  await runtime?.stop("startup_failure", true).catch((stopError) => {
-    console.error(`Failed to stop runtime after startup failure: ${errorDetail(stopError)}`);
-  });
-  process.exit(1);
 }
 
-function createServer(runtime: ControlSurfaceRuntime): http.Server {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  installProcessHandlers();
+  try {
+    await main();
+  } catch (error) {
+    console.error(formatStartupFailure(error));
+    await runtime?.stop("startup_failure", true).catch((stopError) => {
+      console.error(`Failed to stop runtime after startup failure: ${errorDetail(stopError)}`);
+    });
+    process.exit(1);
+  }
+}
+
+export function createServer(runtime: ControlSurfaceRuntime): http.Server {
   const server = http.createServer(async (req, res) => {
     applyCorsHeaders(res);
     if ((req.method ?? "GET") === "OPTIONS") {

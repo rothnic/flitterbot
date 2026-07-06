@@ -421,4 +421,9 @@ export const CONTROL_SURFACE_ENDPOINTS = {
     path: "/api/streams/compact",
     auth: "bearer",
   },
+  streamWorkers: {
+    method: "GET",
+    path: "/api/streams/:streamId/workers",
+    auth: "bearer",
+  },
 } as const;
