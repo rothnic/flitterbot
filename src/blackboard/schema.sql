@@ -1,4 +1,4 @@
--- Flitterbot blackboard schema (v20)
+-- Flitterbot blackboard schema (v24)
 -- This file is the single source of truth for fresh database creation.
 -- Keep in sync with BLACKBOARD_SCHEMA_SQL in src/contracts/blackboard.ts.
 PRAGMA journal_mode=WAL;
@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS streams (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     closed_at TEXT,
     base_branch TEXT,
-    pinned BOOLEAN NOT NULL DEFAULT 0
+    pinned BOOLEAN NOT NULL DEFAULT 0,
+    stream_user TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -66,7 +67,8 @@ CREATE TABLE IF NOT EXISTS pi_sessions (
     ended_at DATETIME,
     end_reason TEXT,
     stream_id TEXT REFERENCES streams(id) ON DELETE SET NULL,
-    last_datetime_reported_at DATETIME
+    last_datetime_reported_at DATETIME,
+    session_user TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_pi_sessions_stream ON pi_sessions(stream_id);
@@ -143,6 +145,88 @@ CREATE INDEX IF NOT EXISTS idx_messages_source_created ON messages(source, creat
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_stream ON messages(stream_id);
 CREATE INDEX IF NOT EXISTS idx_messages_pi_session ON messages(pi_session_id);
+
+CREATE TABLE IF NOT EXISTS worker_hosts (
+    host_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    connection_mode TEXT NOT NULL
+      CHECK (connection_mode IN ('local-stdio', 'ssh-stdio', 'unix-socket', 'websocket-auth')),
+    connection_target TEXT,
+    projects_root TEXT,
+    codex_home TEXT,
+    max_concurrent_workers INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'unknown'
+      CHECK (status IN ('unknown', 'ready', 'busy', 'unreachable', 'disabled')),
+    last_heartbeat_at DATETIME,
+    capabilities_json TEXT,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS worker_sessions (
+    worker_session_id TEXT PRIMARY KEY,
+    runner_type TEXT NOT NULL
+      CHECK (runner_type IN ('codex_app_server', 'codex_exec', 'claude_tmux', 'pi')),
+    status TEXT NOT NULL DEFAULT 'starting'
+      CHECK (status IN ('starting', 'running', 'waiting_for_user', 'idle', 'completed', 'failed', 'canceled', 'unreachable')),
+    host_id TEXT REFERENCES worker_hosts(host_id) ON DELETE SET NULL,
+    stream_id TEXT REFERENCES streams(id) ON DELETE SET NULL,
+    pi_session_id TEXT REFERENCES pi_sessions(pi_session_id) ON DELETE SET NULL,
+    legacy_session_id TEXT,
+    cwd TEXT NOT NULL,
+    repo_path TEXT,
+    worktree_path TEXT,
+    branch TEXT,
+    model_provider TEXT,
+    model_id TEXT,
+    external_thread_id TEXT,
+    external_session_id TEXT,
+    approval_policy TEXT,
+    sandbox_policy TEXT,
+    started_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    last_event_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    completed_at DATETIME,
+    error_message TEXT,
+    metadata_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS worker_turns (
+    worker_turn_id TEXT PRIMARY KEY,
+    worker_session_id TEXT NOT NULL REFERENCES worker_sessions(worker_session_id) ON DELETE CASCADE,
+    external_turn_id TEXT,
+    client_message_id TEXT,
+    status TEXT NOT NULL DEFAULT 'queued'
+      CHECK (status IN ('queued', 'running', 'waiting_for_user', 'completed', 'failed', 'canceled')),
+    prompt TEXT,
+    final_output TEXT,
+    started_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    completed_at DATETIME,
+    error_message TEXT,
+    metadata_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS worker_events (
+    worker_event_id TEXT PRIMARY KEY,
+    worker_session_id TEXT NOT NULL REFERENCES worker_sessions(worker_session_id) ON DELETE CASCADE,
+    worker_turn_id TEXT REFERENCES worker_turns(worker_turn_id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL,
+    event_source TEXT NOT NULL DEFAULT 'runner',
+    payload_json TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_worker_hosts_status ON worker_hosts(status);
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_status ON worker_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_runner ON worker_sessions(runner_type);
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_host ON worker_sessions(host_id);
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_stream ON worker_sessions(stream_id);
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_pi_session ON worker_sessions(pi_session_id);
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_external_thread ON worker_sessions(external_thread_id);
+CREATE INDEX IF NOT EXISTS idx_worker_turns_session ON worker_turns(worker_session_id);
+CREATE INDEX IF NOT EXISTS idx_worker_turns_status ON worker_turns(status);
+CREATE INDEX IF NOT EXISTS idx_worker_turns_external ON worker_turns(external_turn_id);
+CREATE INDEX IF NOT EXISTS idx_worker_events_session_created ON worker_events(worker_session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_worker_events_turn_created ON worker_events(worker_turn_id, created_at);
 
 CREATE TABLE IF NOT EXISTS user_config (
     user_id TEXT NOT NULL,

@@ -178,6 +178,10 @@ function commandExists(cmd) {
   try { execSync(`command -v ${cmd}`, { stdio: "pipe" }); return true; } catch { return false; }
 }
 
+function codexAuthConfigured() {
+  return Boolean(process.env.CODEX_ACCESS_TOKEN) || existsSync(join(HOME, ".codex", "auth.json"));
+}
+
 function generateToken() {
   return randomUUID();
 }
@@ -440,6 +444,12 @@ function preflight() {
     warn(`Unsupported OS: ${CURRENT_OS}. Hooks will install, scheduler may be skipped.`);
   }
 
+  if (!commandExists("codex")) {
+    warn("codex CLI not found on PATH. Install Codex and sign in before starting Flitterbot's Codex worker runner.");
+  } else if (!codexAuthConfigured()) {
+    warn("Codex auth not found. Run `codex login` or provide CODEX_ACCESS_TOKEN before starting Flitterbot's Codex worker runner.");
+  }
+
   computeProjectRoot();
   prepareDirectories();
 
@@ -489,16 +499,47 @@ async function bootstrapConfig() {
 
   const DEFAULT_MODELS = [
     {
+      id: "gpt-5.5",
+      label: "GPT 5.5",
+      provider: "openai-codex",
+      modelId: "gpt-5.5",
+    },
+    {
       id: "claude-opus-4-7",
       label: "Claude Opus 4.7",
       provider: "anthropic",
       modelId: "claude-opus-4-7",
     },
+  ];
+  const DEFAULT_CLASSIFIER = {
+    provider: "groq",
+    model: "openai/gpt-oss-120b",
+    apiKeyEnv: "GROQ_API_KEY",
+    baseURL: "https://api.groq.com/openai/v1",
+    maxTokens: 1024,
+  };
+  const DEFAULT_CODEX_WORKER_PROFILES = [
     {
-      id: "gpt-5.5",
-      label: "GPT 5.5",
-      provider: "openai-codex",
-      modelId: "gpt-5.5",
+      id: "coding",
+      label: "Coding worker",
+      model: "gpt-5.5",
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      developerInstructions:
+        "You are a Flitterbot coding worker. Focus on the delegated task, make scoped changes, and report concise final output.",
+      skillNames: [],
+      skillPaths: [],
+    },
+    {
+      id: "light",
+      label: "Light coding worker",
+      model: "gpt-5.4-mini",
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      developerInstructions:
+        "Use this profile for simple edits, classification support, and quick repo inspection tasks.",
+      skillNames: [],
+      skillPaths: [],
     },
   ];
   const DEFAULT_AGENT_FIRST_MESSAGE =
@@ -512,6 +553,9 @@ async function bootstrapConfig() {
     models: DEFAULT_MODELS,
     defaultModel: DEFAULT_MODELS[0].id,
     defaultThinkingLevel: "high",
+    classifier: DEFAULT_CLASSIFIER,
+    defaultCodexWorkerProfile: DEFAULT_CODEX_WORKER_PROFILES[0].id,
+    codexWorkerProfiles: DEFAULT_CODEX_WORKER_PROFILES,
     piTransport: "websocket-cached",
     stallMinutes: 15,
     toolTimeoutMinutes: 4,
@@ -523,6 +567,7 @@ async function bootstrapConfig() {
     whatsappDaemonPath: "~/.flitterbot/whatsapp/daemon.js",
     whatsappEnabled: true,
     wipeStreamsOnStart: false,
+    shortcuts: {},
     claudeCliCommand: "claude --dangerously-skip-permissions",
     projectsDir: "~/development",
     defaultAgentFirstMessage: DEFAULT_AGENT_FIRST_MESSAGE,

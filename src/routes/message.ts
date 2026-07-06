@@ -1,7 +1,7 @@
 import type http from "node:http";
 import { getActivePiSessionId, getStreamByName } from "../blackboard/query-streams.ts";
 import { classifyMessage } from "../classifier/classify.ts";
-import { resolveGroqApiKey } from "../classifier/groq-client.ts";
+import { resolveClassifierApiKey } from "../classifier/groq-client.ts";
 import type {
   DeliveryMode,
   MessageMetadata,
@@ -102,12 +102,14 @@ async function routeMessage(
   }
 
   try {
-    const apiKey = resolveGroqApiKey();
-    if (!apiKey) return { metadata: fallback };
+    const classifier = runtime.config.classifier;
+    const apiKey = resolveClassifierApiKey(classifier);
+    if (classifier.provider === "disabled") return { metadata: fallback };
+    if (classifier.provider !== "pi" && !apiKey) return { metadata: fallback };
     const result = await classifyMessage(
       rawText,
       runtime.blackboard,
-      apiKey,
+      runtime.config,
       defaultPiSessionId,
       ownerUser,
     );

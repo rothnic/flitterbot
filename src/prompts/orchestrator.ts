@@ -29,7 +29,8 @@ You are managing a single stream of work.
 ## RULES
 
 - Set up a worktree before non-trivial code changes. See the \`set_up_worktree\` tool description.
-- Fan reads out in parallel and parallelize downstream work.
+- Fan reads out in parallel and use \`launch_codex_worker\` for delegated coding or focused repo work.
+- Codex workers are the default execution plane for coding tasks. Use \`get_codex_worker_status\`, \`send_codex_worker_followup\`, and \`cancel_codex_worker\` to manage them.
 - Call \`close_stream\` only when the user signals finality ("looks good", "ship it", "done"). Default \`mode: "merge"\`. If the user says "merge with main" / "rebase" they are asking to skip the tool, its a git request — run them directly, do not close.
 - When a skill says "References are relative to <path>", join that base with relative refs (e.g. \`scripts/foo.py\` → \`<base>/scripts/foo.py\`).
 - When you see a \`/skill:<name>\` token anywhere in a message (head, middle, or quoted), look up \`<name>\` in \`<available_skills>\` and Read its SKILL.md from the listed \`<location>\` to load it before proceeding.
@@ -52,15 +53,15 @@ When communicating with the user, distill to the essential point. Be direct, avo
 function renderTmuxSection(ctx: OrchestratorContext): string {
   const wsFlag = ctx.streamId ? ` --stream-id ${ctx.streamId}` : "";
   return `
-## Sub-agents (tmux)
+## Optional Terminal Supervision (tmux)
 
-Load the \`/skill:tmux\` skill once before spawning sub-agents — it supplies the session-launch and message/send helpers you'll need. Skip reloading if you have context for it it already.
+Codex workers are the preferred coding-worker path. Use tmux only when you need an attachable terminal process, a manual fallback runner, or legacy Claude/tmux compatibility.
 
-Spawn Claude Code sub-agents through tmux when work is parallelizable. Define work to delegate and make investigation across different aspects parallelizable. Prompt them by stating the problem, not the solution. Pass instructions through; make them positive, positioned as if you are the user passing through a message to investigate or do. Tone should be positive, tight, succinct, clear, and not overly prescriptive. You may include your interpretation, spec paths, and constraints, but soften the language a little bit, avoid hard gating with negatives. Describe what's broken or what the user wants, name files or areas when already known, and state the constraints that matter ("might be good to use existing Groq client", "classifier interface shouldn't get modified as part of this, but if you need to tell me").
+Load the \`/skill:tmux\` skill only before using tmux-managed sessions. It supplies session-launch and message/send helpers. Skip reloading if you already have that context.
 
-Launch sub-agents with \`--pi-session-id ${ctx.piSessionId}${wsFlag}\` so stop events route back to this work stream and your pi-session.
+When using tmux-managed legacy sessions, launch them with \`--pi-session-id ${ctx.piSessionId}${wsFlag}\` so stop events route back to this work stream and your pi-session.
 
-Sub-agents auto-notify on completion via stop events — so fire and forget instead of waiting. No polling or sleeping. On a stop event, if needed you may query the blackboard for session details, and read the transcript or tmux pane, then decide: notify the user, follow up on the same session through tmux \`message\`, or launch a fresh session when a new exploration is required — re-prompting isn't the goal when the direction has shifted. Reserve \`send\` for raw keystrokes: a bare Enter for permission prompts, or an Escape to cancel an inferring session and stop it in its tracks. Stop events from sessions you didn't prompt mean the user is interacting directly — read to stay in the loop, but don't act.
+Codex worker state lives in \`worker_sessions\`, \`worker_turns\`, and \`worker_events\`. Tmux state is terminal supervision only; do not treat a tmux pane as the source of truth for Codex worker lifecycle.
 `;
 }
 // === HUMAN REVIEW LINE === ABOVE: FINAL === BELOW: EDITABLE ===

@@ -42,6 +42,14 @@ import {
   setStreamType,
   updateStreamRepoPath,
 } from "./blackboard/query-streams.ts";
+import {
+  getLatestWorkerTurnBySession,
+  getWorkerSession,
+  listWorkerSessionsByStream,
+  listWorkerTurnsBySession,
+  updateWorkerSession,
+  updateWorkerTurn,
+} from "./blackboard/query-workers.ts";
 import { createQueryBlackboardTool } from "./blackboard/tool-query-blackboard.ts";
 import { killTmuxSession } from "./claude-sessions/tmux.ts";
 import { type FlitterbotConfig, loadConfig, type ThinkingLevel } from "./config/load-config.ts";
@@ -90,6 +98,13 @@ import {
   stopDaemonProcess,
   waitForDaemonReady,
 } from "./whatsapp/process.ts";
+import { resolveCodexWorkerProfile } from "./workers/codex-worker-profiles.ts";
+import {
+  type CodexWorkerRunHandle,
+  parseWorkerProfileId,
+  startCodexWorker,
+  startCodexWorkerFollowUp,
+} from "./workers/codex-worker-runner.ts";
 import { type WebSocketClient, WebSocketHub } from "./ws/hub.ts";
 
 // ponytail: prefer the SDK's tool definition type here instead of maintaining a local mirror.
@@ -119,6 +134,13 @@ type EnqueueInput = {
   clientMessageId?: string;
 };
 
+type ActiveCodexWorker = {
+  handle: CodexWorkerRunHandle;
+  streamId?: string | null;
+  streamName?: string | null;
+  canceled?: boolean;
+};
+
 const ACCEPTED_HOOK_EVENTS = new Set(["session-start", "stop", "session-end"]);
 
 // ponytail: this god object mixes server lifecycle, routing, streams, WhatsApp, tools, and queues; split by domain when touching it.
@@ -133,6 +155,7 @@ export class ControlSurfaceRuntime {
   private stopping = false;
   private maintenanceTimer?: NodeJS.Timeout;
   private whatsappStatusWatcher?: fs.FSWatcher;
+  private readonly activeCodexWorkers = new Map<string, ActiveCodexWorker>();
   private whatsappStatusCache: {
     status: ControlSurfaceWhatsAppStatus;
     pid?: number;
@@ -1730,6 +1753,241 @@ export class ControlSurfaceRuntime {
     });
   }
 
+  private resolveCodexWorkerCwd(streamId: string | undefined, cwd?: string): string {
+    if (cwd?.trim()) return path.resolve(cwd.trim());
+    const stream = streamId ? getStreamById(this.blackboard, streamId) : null;
+    return path.resolve(stream?.worktree_path ?? stream?.repo_path ?? this.config.projectsDir);
+  }
+
+  private registerActiveCodexWorker(active: ActiveCodexWorker): void {
+    const { handle } = active;
+    this.activeCodexWorkers.set(handle.workerSessionId, active);
+    handle.completion
+      .then((completion) => {
+        if (active.canceled) return;
+        if (!active.streamId || !completion.finalOutput.trim()) return;
+        const stream = getStreamById(this.blackboard, active.streamId);
+        const streamName = stream?.name ?? active.streamName ?? active.streamId;
+        const message = [
+          `Codex worker completed (${completion.workerSessionId.slice(0, 8)}).`,
+          "",
+          completion.finalOutput,
+        ].join("\n");
+        const orchestrator = this.sessionManager.getByStream(active.streamId);
+        if (orchestrator) {
+          orchestrator.queue.enqueue({
+            id: `codex-worker-${completion.workerTurnId}`,
+            text: message,
+            source: "agent",
+            sender: "system",
+            metadata: {
+              stream_id: active.streamId,
+              stream_name: streamName,
+              worker_session_id: completion.workerSessionId,
+              worker_turn_id: completion.workerTurnId,
+              codex_thread_id: completion.threadId,
+              codex_turn_id: completion.turnId,
+            },
+            receivedAt: new Date().toISOString(),
+          });
+        }
+        persistInboundMessage(this.blackboard, {
+          source: "agent",
+          content: message,
+          sender: "system",
+          streamId: active.streamId,
+          piSessionId: orchestrator?.piSessionId,
+          metadata: {
+            stream_id: active.streamId,
+            stream_name: streamName,
+            worker_session_id: completion.workerSessionId,
+            worker_turn_id: completion.workerTurnId,
+            codex_thread_id: completion.threadId,
+            codex_turn_id: completion.turnId,
+            worker_event: "completed",
+          },
+        });
+      })
+      .catch((error) => {
+        this.log(
+          `codex worker ${handle.workerSessionId} failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      })
+      .finally(() => {
+        this.activeCodexWorkers.delete(handle.workerSessionId);
+      });
+  }
+
+  private async launchCodexWorkerTask(input: {
+    streamId?: string;
+    profileId?: string;
+    prompt: string;
+    cwd?: string;
+    context?: string;
+  }): Promise<{
+    workerSessionId: string;
+    workerTurnId: string;
+    threadId: string;
+    turnId: string;
+    profileId: string;
+    cwd: string;
+    streamId?: string;
+    streamName?: string;
+  }> {
+    const targetStreamId = input.streamId;
+    const stream = targetStreamId ? getStreamById(this.blackboard, targetStreamId) : null;
+    if (targetStreamId && !stream) throw new Error(`Stream not found: ${targetStreamId}`);
+    if (stream && stream.status !== "open") throw new Error(`Stream is closed: ${stream.name}`);
+    const cwd = this.resolveCodexWorkerCwd(targetStreamId, input.cwd);
+    if (!fs.existsSync(cwd)) throw new Error(`Codex worker cwd does not exist: ${cwd}`);
+    const profile = resolveCodexWorkerProfile(this.config, input.profileId);
+    const managed = targetStreamId ? this.sessionManager.getByStream(targetStreamId) : undefined;
+    const handle = await startCodexWorker({
+      db: this.blackboard,
+      cwd,
+      prompt: input.prompt,
+      streamId: targetStreamId,
+      piSessionId: managed?.piSessionId,
+      profile,
+      context: input.context,
+    });
+    this.registerActiveCodexWorker({
+      handle,
+      streamId: targetStreamId,
+      streamName: stream?.name,
+    });
+    return {
+      workerSessionId: handle.workerSessionId,
+      workerTurnId: handle.workerTurnId,
+      threadId: handle.threadId,
+      turnId: handle.turnId,
+      profileId: profile.id,
+      cwd,
+      streamId: targetStreamId,
+      streamName: stream?.name,
+    };
+  }
+
+  private async followUpCodexWorkerTask(input: {
+    workerSessionId: string;
+    prompt: string;
+    profileId?: string;
+  }): Promise<{
+    workerSessionId: string;
+    workerTurnId: string;
+    threadId: string;
+    turnId: string;
+    profileId: string;
+    streamId?: string | null;
+  }> {
+    if (this.activeCodexWorkers.has(input.workerSessionId)) {
+      throw new Error(`Worker ${input.workerSessionId} is still running; wait or cancel first`);
+    }
+    const session = getWorkerSession(this.blackboard, input.workerSessionId);
+    if (!session) throw new Error(`Unknown worker session: ${input.workerSessionId}`);
+    const profileId = input.profileId ?? parseWorkerProfileId(session);
+    const profile = resolveCodexWorkerProfile(this.config, profileId);
+    const handle = await startCodexWorkerFollowUp({
+      db: this.blackboard,
+      workerSessionId: input.workerSessionId,
+      cwd: session.cwd,
+      prompt: input.prompt,
+      profile,
+    });
+    const stream = session.stream_id ? getStreamById(this.blackboard, session.stream_id) : null;
+    this.registerActiveCodexWorker({
+      handle,
+      streamId: session.stream_id,
+      streamName: stream?.name,
+    });
+    return {
+      workerSessionId: handle.workerSessionId,
+      workerTurnId: handle.workerTurnId,
+      threadId: handle.threadId,
+      turnId: handle.turnId,
+      profileId: profile.id,
+      streamId: session.stream_id,
+    };
+  }
+
+  private getCodexWorkerStatus(input: { workerSessionId?: string; streamId?: string }): {
+    session: ReturnType<typeof getWorkerSession>;
+    turns: ReturnType<typeof listWorkerTurnsBySession>;
+    active: boolean;
+  } {
+    let workerSessionId = input.workerSessionId;
+    if (!workerSessionId && input.streamId) {
+      workerSessionId = listWorkerSessionsByStream(this.blackboard, input.streamId, 1)[0]
+        ?.worker_session_id;
+    }
+    if (!workerSessionId) throw new Error("Provide worker_session_id or stream_id");
+    const session = getWorkerSession(this.blackboard, workerSessionId);
+    if (!session) throw new Error(`Unknown worker session: ${workerSessionId}`);
+    return {
+      session,
+      turns: listWorkerTurnsBySession(this.blackboard, workerSessionId),
+      active: this.activeCodexWorkers.has(workerSessionId),
+    };
+  }
+
+  private async cancelCodexWorkerTask(workerSessionId: string): Promise<{
+    workerSessionId: string;
+    canceled: boolean;
+    reason?: string;
+  }> {
+    const session = getWorkerSession(this.blackboard, workerSessionId);
+    if (!session) throw new Error(`Unknown worker session: ${workerSessionId}`);
+    const active = this.activeCodexWorkers.get(workerSessionId);
+    const latestTurn = getLatestWorkerTurnBySession(this.blackboard, workerSessionId);
+    if (!active) {
+      if (
+        session.status === "completed" ||
+        session.status === "failed" ||
+        session.status === "canceled"
+      ) {
+        return { workerSessionId, canceled: false, reason: `already ${session.status}` };
+      }
+      updateWorkerSession(this.blackboard, workerSessionId, {
+        status: "canceled",
+        completedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      });
+      if (latestTurn && latestTurn.status === "running") {
+        updateWorkerTurn(this.blackboard, latestTurn.worker_turn_id, {
+          status: "canceled",
+          completedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+        });
+      }
+      return {
+        workerSessionId,
+        canceled: true,
+        reason: "no active app-server client in this runtime; persisted canceled state",
+      };
+    }
+    active.canceled = true;
+    try {
+      await active.handle.client.interruptTurn({
+        threadId: active.handle.threadId,
+        turnId: active.handle.turnId,
+      });
+    } catch (error) {
+      active.canceled = false;
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.toLowerCase().includes("no active turn")) {
+        return { workerSessionId, canceled: false, reason: message };
+      }
+      throw error;
+    }
+    updateWorkerSession(this.blackboard, workerSessionId, {
+      status: "canceled",
+      completedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    });
+    updateWorkerTurn(this.blackboard, active.handle.workerTurnId, {
+      status: "canceled",
+      completedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    });
+    return { workerSessionId, canceled: true };
+  }
+
   private createStreamSessionTools(streamId: string): CustomToolDefinition[] {
     const stream = getStreamById(this.blackboard, streamId);
     return this.createCustomTools(
@@ -1910,21 +2168,23 @@ export class ControlSurfaceRuntime {
                 const { getPreviousStreamCreatedAt } = await import(
                   "./blackboard/query-streams.ts"
                 );
-                const { resolveGroqApiKey } = await import("./classifier/groq-client.ts");
                 const { classifyContextRelevance } = await import(
                   "./classifier/context-relevance.ts"
                 );
                 const { formatStreamPrompt } = await import("./streams/format-stream-prompt.ts");
-                const apiKey = resolveGroqApiKey();
 
                 const boundary = getPreviousStreamCreatedAt(this.blackboard, ws.id);
                 const recentMessages = getRecentDefaultMessages(this.blackboard, 10, boundary);
 
-                if (role === "default" && apiKey && recentMessages.length > 1) {
+                if (
+                  role === "default" &&
+                  this.config.classifier.provider !== "disabled" &&
+                  recentMessages.length > 1
+                ) {
                   const relevance = await classifyContextRelevance(
                     recentMessages,
                     ws.name,
-                    apiKey,
+                    this.config,
                     agentMessage,
                     this.log.bind(this),
                   );
@@ -2184,6 +2444,241 @@ export class ControlSurfaceRuntime {
     }
 
     if (role === "orchestrator") {
+      tools.push({
+        name: "launch_codex_worker",
+        label: "Launch Codex Worker",
+        description:
+          "Launch a real Codex app-server coding worker for this stream. Use for implementation, focused repo inspection, or parallel coding work. Codex worker state is tracked in worker_sessions/worker_turns/worker_events; tmux is not required.",
+        parameters: {
+          type: "object",
+          properties: {
+            prompt: {
+              type: "string",
+              description:
+                "Task prompt for the Codex worker. State the problem and relevant files/constraints.",
+            },
+            profile: {
+              type: "string",
+              description:
+                "Optional Codex worker profile id from config, such as coding or light. Defaults to defaultCodexWorkerProfile.",
+            },
+            cwd: {
+              type: "string",
+              description:
+                "Optional absolute working directory. Defaults to this stream's worktree, repo path, or projectsDir.",
+            },
+            stream_id: {
+              type: "string",
+              description:
+                "Optional stream id. Defaults to the current orchestrator stream; use only for deliberate cross-stream launch.",
+            },
+            context: {
+              type: "string",
+              description: "Optional extra context injected as Codex developer instructions.",
+            },
+          },
+          required: ["prompt"],
+          additionalProperties: false,
+        },
+        execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+          try {
+            const parsed = params as {
+              prompt: string;
+              profile?: string;
+              cwd?: string;
+              stream_id?: string;
+              context?: string;
+            };
+            const result = await this.launchCodexWorkerTask({
+              streamId: parsed.stream_id || streamId,
+              profileId: parsed.profile,
+              prompt: parsed.prompt,
+              cwd: parsed.cwd,
+              context: parsed.context,
+            });
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Codex worker launched (${result.workerSessionId}). Profile: ${result.profileId}. Thread: ${result.threadId}. The final output will be routed back to this stream when the turn completes.`,
+                },
+              ],
+              details: result,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Failed to launch Codex worker: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+              details: { error: true },
+            };
+          }
+        },
+      });
+
+      tools.push({
+        name: "send_codex_worker_followup",
+        label: "Send Codex Worker Follow-Up",
+        description:
+          "Resume an existing Codex app-server worker thread and send a follow-up prompt. Use after a worker completed when the same thread should continue.",
+        parameters: {
+          type: "object",
+          properties: {
+            worker_session_id: {
+              type: "string",
+              description: "Worker session id returned by launch_codex_worker.",
+            },
+            prompt: {
+              type: "string",
+              description: "Follow-up prompt to send to the same Codex thread.",
+            },
+            profile: {
+              type: "string",
+              description:
+                "Optional profile override. Defaults to the profile recorded on the worker session.",
+            },
+          },
+          required: ["worker_session_id", "prompt"],
+          additionalProperties: false,
+        },
+        execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+          try {
+            const parsed = params as {
+              worker_session_id: string;
+              prompt: string;
+              profile?: string;
+            };
+            const result = await this.followUpCodexWorkerTask({
+              workerSessionId: parsed.worker_session_id,
+              prompt: parsed.prompt,
+              profileId: parsed.profile,
+            });
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Codex worker follow-up started (${result.workerTurnId}) on worker session ${result.workerSessionId}.`,
+                },
+              ],
+              details: result,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Failed to send Codex worker follow-up: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+              details: { error: true },
+            };
+          }
+        },
+      });
+
+      tools.push({
+        name: "cancel_codex_worker",
+        label: "Cancel Codex Worker",
+        description:
+          "Cancel an active Codex app-server worker turn and mark its worker session canceled.",
+        parameters: {
+          type: "object",
+          properties: {
+            worker_session_id: {
+              type: "string",
+              description: "Worker session id returned by launch_codex_worker.",
+            },
+          },
+          required: ["worker_session_id"],
+          additionalProperties: false,
+        },
+        execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+          try {
+            const parsed = params as { worker_session_id: string };
+            const result = await this.cancelCodexWorkerTask(parsed.worker_session_id);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: result.canceled
+                    ? `Codex worker canceled: ${result.workerSessionId}`
+                    : `Codex worker was not canceled: ${result.reason ?? result.workerSessionId}`,
+                },
+              ],
+              details: result,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Failed to cancel Codex worker: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+              details: { error: true },
+            };
+          }
+        },
+      });
+
+      tools.push({
+        name: "get_codex_worker_status",
+        label: "Get Codex Worker Status",
+        description:
+          "Inspect a Codex worker session and its turns. Provide worker_session_id, or omit it to inspect the latest worker for this stream.",
+        parameters: {
+          type: "object",
+          properties: {
+            worker_session_id: {
+              type: "string",
+              description: "Optional worker session id.",
+            },
+            stream_id: {
+              type: "string",
+              description: "Optional stream id. Defaults to the current stream.",
+            },
+          },
+          additionalProperties: false,
+        },
+        execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+          try {
+            const parsed = params as { worker_session_id?: string; stream_id?: string };
+            const result = this.getCodexWorkerStatus({
+              workerSessionId: parsed.worker_session_id,
+              streamId: parsed.stream_id || streamId,
+            });
+            const latestTurn = result.turns.at(-1);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: [
+                    `Codex worker ${result.session?.worker_session_id} is ${result.session?.status}${result.active ? " (active in this runtime)" : ""}.`,
+                    latestTurn
+                      ? `Latest turn ${latestTurn.worker_turn_id} is ${latestTurn.status}.`
+                      : "No turns recorded.",
+                  ].join("\n"),
+                },
+              ],
+              details: result,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Failed to inspect Codex worker: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+              details: { error: true },
+            };
+          }
+        },
+      });
+
       tools.push({
         name: "set_up_worktree",
         label: "Set Up Worktree",
@@ -2573,14 +3068,18 @@ export class ControlSurfaceRuntime {
       } else {
         try {
           const { classifyMessage } = await import("./classifier/classify.ts");
-          const { resolveGroqApiKey } = await import("./classifier/groq-client.ts");
-          const apiKey = resolveGroqApiKey();
-          if (!apiKey) throw new Error("No Groq API key available");
+          const { resolveClassifierApiKey } = await import("./classifier/groq-client.ts");
+          const classifier = this.config.classifier;
+          const apiKey = resolveClassifierApiKey(classifier);
+          if (classifier.provider === "disabled") throw new Error("Classifier is disabled");
+          if (classifier.provider !== "pi" && !apiKey) {
+            throw new Error(`No classifier API key available in ${classifier.apiKeyEnv}`);
+          }
           const defaultPiSessionId = this.sessionManager.getDefault()?.piSessionId;
           const result = await classifyMessage(
             payload.text,
             this.blackboard,
-            apiKey,
+            this.config,
             defaultPiSessionId,
             loadWhatsAppConfig().defaultUser ?? undefined,
           );
