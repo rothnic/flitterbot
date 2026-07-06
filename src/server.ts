@@ -32,6 +32,12 @@ import {
 } from "./routes/browser-user-config.ts";
 import { handleBrowserWorkerSessionsRoute } from "./routes/browser-worker-sessions.ts";
 import { handleCloseStreamNoopRoute } from "./routes/close-stream.ts";
+import {
+  handleCodexWorkerCancelRoute,
+  handleCodexWorkerFollowUpRoute,
+  handleCodexWorkerLaunchRoute,
+  handleCodexWorkerStatusRoute,
+} from "./routes/codex-workers.ts";
 import { handleCompactPiSessionRoute } from "./routes/compact-pi-session.ts";
 import { handleCreateStreamRoute } from "./routes/create-stream.ts";
 import { handleCronTickRoute } from "./routes/cron-tick.ts";
@@ -209,6 +215,38 @@ async function routeRequest(
   }
   if (method === "POST" && pathname === "/api/models/pin") {
     return handleBrowserModelsPinRoute(runtime, req, res);
+  }
+  if (method === "POST" && pathname === "/api/workers") {
+    return handleCodexWorkerLaunchRoute(runtime, req, res);
+  }
+  if (
+    method === "GET" &&
+    segments[0] === "api" &&
+    segments[1] === "workers" &&
+    segments[2] &&
+    !segments[3]
+  ) {
+    return handleCodexWorkerStatusRoute(runtime, req, res, decodeURIComponent(segments[2]));
+  }
+  if (
+    method === "POST" &&
+    segments[0] === "api" &&
+    segments[1] === "workers" &&
+    segments[2] &&
+    segments[3] === "followup" &&
+    !segments[4]
+  ) {
+    return handleCodexWorkerFollowUpRoute(runtime, req, res, decodeURIComponent(segments[2]));
+  }
+  if (
+    method === "POST" &&
+    segments[0] === "api" &&
+    segments[1] === "workers" &&
+    segments[2] &&
+    segments[3] === "cancel" &&
+    !segments[4]
+  ) {
+    return handleCodexWorkerCancelRoute(runtime, req, res, decodeURIComponent(segments[2]));
   }
   if (
     method === CONTROL_SURFACE_ENDPOINTS.directoryCompletions.method &&

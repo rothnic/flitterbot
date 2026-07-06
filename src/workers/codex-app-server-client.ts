@@ -70,6 +70,8 @@ export class CodexAppServerClient {
   private readonly onStderr?: (chunk: string) => void;
   private stderrTail = "";
   private exited = false;
+  private closed = false;
+  private readonly closeHandlers = new Set<(error: Error) => void>();
 
   constructor(options: CodexAppServerClientOptions = {}) {
     this.onEvent = options.onEvent;
@@ -97,6 +99,7 @@ export class CodexAppServerClient {
       );
       for (const pending of this.pending.values()) pending.reject(error);
       this.pending.clear();
+      this.rejectCloseHandlers(error);
     });
   }
 
@@ -210,6 +213,11 @@ export class CodexAppServerClient {
       }, timeoutMs);
 
       const originalOnEvent = this.onEvent;
+      const closeHandler = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      this.closeHandlers.add(closeHandler);
       const eventHandler = (event: CodexAppServerEvent) => {
         originalOnEvent?.(event);
         const params = event.params;
@@ -241,6 +249,7 @@ export class CodexAppServerClient {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
+        this.closeHandlers.delete(closeHandler);
         this.onEvent = originalOnEvent;
       };
 
@@ -249,9 +258,18 @@ export class CodexAppServerClient {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.rejectCloseHandlers(new Error("codex app-server client closed"));
     this.rl.close();
-    this.child.stdin.end();
+    if (!this.child.stdin.destroyed) this.child.stdin.end();
     if (!this.exited) this.child.kill("SIGTERM");
+  }
+
+  private rejectCloseHandlers(error: Error): void {
+    const handlers = [...this.closeHandlers];
+    this.closeHandlers.clear();
+    for (const handler of handlers) handler(error);
   }
 
   private request(method: string, params?: unknown): Promise<unknown> {

@@ -17,6 +17,7 @@ function parseArgs(argv) {
     restartRecoveryWorkerHost: undefined,
     restartRecoverySshTarget: undefined,
     restartRecoveryWorkerCwd: undefined,
+    serverRestartRecovery: false,
     timeoutMs: DEFAULT_TIMEOUT_MS,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -48,6 +49,8 @@ function parseArgs(argv) {
     } else if (arg === "--restart-recovery-worker-cwd" && next) {
       opts.restartRecoveryWorkerCwd = next;
       i += 1;
+    } else if (arg === "--server-restart-recovery") {
+      opts.serverRestartRecovery = true;
     } else if (arg === "--timeout-ms" && next) {
       opts.timeoutMs = Number(next);
       i += 1;
@@ -110,6 +113,8 @@ Options:
                           SSH target when restart recovery uses an SSH host
   --restart-recovery-worker-cwd <path>
                           Worker cwd on the recovery host; required for SSH hosts
+  --server-restart-recovery
+                          Run the real server-process Codex worker restart E2E
   --live-pi-harness        Run the live Pi harness in report mode
   --audit                  Run pnpm run audit
   --web-build              Run pnpm --dir web run build
@@ -256,6 +261,18 @@ function main() {
     }
     steps.push(
       runStep("restartRecovery", node, restartRecoveryArgs),
+    );
+  }
+  if (opts.serverRestartRecovery) {
+    steps.push(
+      runStep("serverRestartRecovery", node, [
+        "--experimental-strip-types",
+        "scripts/e2e-codex-worker-server-restart.mjs",
+        "--cwd",
+        opts.cwd,
+        "--timeout-ms",
+        String(opts.timeoutMs),
+      ]),
     );
   }
   if (opts.webBuild) {

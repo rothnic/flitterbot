@@ -14,6 +14,9 @@ and complete a follow-up turn on the same recorded worker session.
   completes.
 - Create a new `ControlSurfaceRuntime` in the same Node process against the
   same config and blackboard.
+- Start the real `src/server.ts` process, launch a worker through the
+  bearer-protected HTTP worker API, stop the process, start a second process,
+  and resume the stored Codex thread through HTTP.
 - Verify the restarted runtime sees no in-memory active worker handle but does
   see the stored `external_thread_id`.
 - Send `send_codex_worker_followup` from the restarted runtime.
@@ -22,7 +25,6 @@ and complete a follow-up turn on the same recorded worker session.
 ## Out Of Scope
 
 - Resuming an in-flight turn that was interrupted by process death.
-- Proving a full control-surface process restart through the CLI/service layer.
 - Running SSH/remote-host restart recovery by default.
 - Migrating a worker session to a different host.
 - Long-lived WebSocket or Unix-socket worker daemons.
@@ -32,6 +34,8 @@ and complete a follow-up turn on the same recorded worker session.
 ```bash
 pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --timeout-ms 180000
 pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --restart-recovery
+pnpm run e2e:codex-worker-server-restart -- --cwd "$PWD" --timeout-ms 180000
+pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --server-restart-recovery
 pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000
 pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --restart-recovery --restart-recovery-worker-host vps-gw --restart-recovery-ssh-target vps-gw --restart-recovery-worker-cwd /home/ubuntu/data/projects/assura-cold-audit
 pnpm run audit
@@ -45,14 +49,18 @@ pnpm run audit
 - The second runtime opens the same blackboard and reads the persisted worker
   session.
 - The second runtime resumes the stored Codex thread and completes a follow-up.
+- The server-process E2E proves launch/status/follow-up through the
+  bearer-protected HTTP worker API across a real `src/server.ts` process
+  restart.
+- The HTTP worker API rejects unauthorized launch requests, oversized worker
+  control bodies, and follow-up attempts against persisted active worker
+  sessions after restart.
 - The worker session keeps the same `worker_session_id`, `host_id`, and Codex
   thread ID across restart and follow-up.
 - `worker_events` contains app-server initialization, resume, and turn events.
 
 ## Future Extensions
 
-- Add a subprocess-level control-surface restart proof that exercises PID,
-  server, and command-wrapper lifecycle.
 - Add recovery for in-flight turns interrupted by controller process death.
 
 ## Verified Evidence
@@ -64,6 +72,12 @@ pnpm run audit
 - `pnpm run doctor:codex-subscription-readiness -- --cwd "$PWD" --restart-recovery --timeout-ms 180000`
   included the local runtime-recreation recovery proof in the aggregate
   readiness report.
+- `pnpm run e2e:codex-worker-server-restart -- --cwd "$PWD" --timeout-ms 180000`
+  started the real control-surface server process, launched a worker through
+  `POST /api/workers`, stopped the process, started a second server process,
+  resumed the worker through `POST /api/workers/:workerSessionId/followup`,
+  verified bearer auth on worker launch, rejected an oversized launch body, and
+  rejected follow-up against a persisted `running` worker session.
 - `pnpm run e2e:codex-worker-restart-recovery -- --cwd "$PWD" --worker-host vps-gw --ssh-target vps-gw --worker-cwd /home/ubuntu/data/projects/assura-cold-audit --timeout-ms 180000`
   passed against the SSH-backed `vps-gw` worker host.
 - The SSH proof launched the initial turn on `vps-gw`, recreated the runtime,

@@ -1,9 +1,18 @@
 import type http from "node:http";
 
-export async function readJsonBody<T = unknown>(req: http.IncomingMessage): Promise<T> {
+export async function readJsonBody<T = unknown>(
+  req: http.IncomingMessage,
+  options: { maxBytes?: number } = {},
+): Promise<T> {
   const chunks: Buffer[] = [];
+  let bytes = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.byteLength;
+    if (options.maxBytes && bytes > options.maxBytes) {
+      throw new Error(`JSON body exceeds ${options.maxBytes} bytes`);
+    }
+    chunks.push(buffer);
   }
   if (chunks.length === 0) return {} as T;
   const raw = Buffer.concat(chunks).toString("utf8").trim();

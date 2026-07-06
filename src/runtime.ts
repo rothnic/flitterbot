@@ -295,6 +295,7 @@ export class ControlSurfaceRuntime {
     if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
     this.unwatchWhatsAppStatusSignal();
     this.sessionManager.disposeAll();
+    await this.closeActiveCodexWorkersForShutdown();
     try {
       await this.stopWhatsAppDaemon();
       await this.refreshWhatsAppStatus();
@@ -1862,6 +1863,26 @@ export class ControlSurfaceRuntime {
       });
   }
 
+  private async closeActiveCodexWorkersForShutdown(): Promise<void> {
+    const activeWorkers = [...this.activeCodexWorkers.values()];
+    if (activeWorkers.length === 0) return;
+    this.log(`closing ${activeWorkers.length} active Codex worker(s) for shutdown`);
+    await Promise.allSettled(
+      activeWorkers.map(async (active) => {
+        active.canceled = true;
+        active.handle.client.close();
+        try {
+          await active.handle.completion;
+        } catch (error) {
+          this.log(
+            `codex worker ${active.handle.workerSessionId} closed during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }),
+    );
+    this.activeCodexWorkers.clear();
+  }
+
   private async launchCodexWorkerTask(input: {
     streamId?: string;
     profileId?: string;
@@ -1926,6 +1947,27 @@ export class ControlSurfaceRuntime {
     }
   }
 
+  async launchCodexWorkerProgrammatic(input: {
+    streamId?: string;
+    profileId?: string;
+    prompt: string;
+    cwd?: string;
+    context?: string;
+    workerHostId?: string;
+  }): Promise<{
+    workerSessionId: string;
+    workerTurnId: string;
+    threadId: string;
+    turnId: string;
+    profileId: string;
+    workerHostId: string;
+    cwd: string;
+    streamId?: string;
+    streamName?: string;
+  }> {
+    return this.launchCodexWorkerTask(input);
+  }
+
   private async followUpCodexWorkerTask(input: {
     workerSessionId: string;
     prompt: string;
@@ -1943,6 +1985,25 @@ export class ControlSurfaceRuntime {
     }
     const session = getWorkerSession(this.blackboard, input.workerSessionId);
     if (!session) throw new Error(`Unknown worker session: ${input.workerSessionId}`);
+    if (
+      session.status === "starting" ||
+      session.status === "running" ||
+      session.status === "waiting_for_user"
+    ) {
+      throw new Error(
+        `Worker ${input.workerSessionId} is still ${session.status}; wait, cancel, or recover it before sending a follow-up`,
+      );
+    }
+    const latestTurn = getLatestWorkerTurnBySession(this.blackboard, input.workerSessionId);
+    if (
+      latestTurn?.status === "queued" ||
+      latestTurn?.status === "running" ||
+      latestTurn?.status === "waiting_for_user"
+    ) {
+      throw new Error(
+        `Worker ${input.workerSessionId} has a ${latestTurn.status} turn; wait, cancel, or recover it before sending a follow-up`,
+      );
+    }
     const profileId = input.profileId ?? parseWorkerProfileId(session);
     const profile = resolveCodexWorkerProfile(this.config, profileId);
     const workerHost = this.resolveCodexWorkerHost(session.host_id ?? undefined);
@@ -1970,6 +2031,21 @@ export class ControlSurfaceRuntime {
     };
   }
 
+  async followUpCodexWorkerProgrammatic(input: {
+    workerSessionId: string;
+    prompt: string;
+    profileId?: string;
+  }): Promise<{
+    workerSessionId: string;
+    workerTurnId: string;
+    threadId: string;
+    turnId: string;
+    profileId: string;
+    streamId?: string | null;
+  }> {
+    return this.followUpCodexWorkerTask(input);
+  }
+
   private getCodexWorkerStatus(input: { workerSessionId?: string; streamId?: string }): {
     session: ReturnType<typeof getWorkerSession>;
     turns: ReturnType<typeof listWorkerTurnsBySession>;
@@ -1988,6 +2064,14 @@ export class ControlSurfaceRuntime {
       turns: listWorkerTurnsBySession(this.blackboard, workerSessionId),
       active: this.activeCodexWorkers.has(workerSessionId),
     };
+  }
+
+  getCodexWorkerStatusProgrammatic(input: { workerSessionId?: string; streamId?: string }): {
+    session: ReturnType<typeof getWorkerSession>;
+    turns: ReturnType<typeof listWorkerTurnsBySession>;
+    active: boolean;
+  } {
+    return this.getCodexWorkerStatus(input);
   }
 
   private async cancelCodexWorkerTask(workerSessionId: string): Promise<{
@@ -2046,6 +2130,14 @@ export class ControlSurfaceRuntime {
       completedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     });
     return { workerSessionId, canceled: true };
+  }
+
+  async cancelCodexWorkerProgrammatic(workerSessionId: string): Promise<{
+    workerSessionId: string;
+    canceled: boolean;
+    reason?: string;
+  }> {
+    return this.cancelCodexWorkerTask(workerSessionId);
   }
 
   private createStreamSessionTools(streamId: string): CustomToolDefinition[] {

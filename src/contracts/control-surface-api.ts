@@ -381,6 +381,26 @@ export const CONTROL_SURFACE_ENDPOINTS = {
     path: "/api/models/pin",
     auth: "bearer",
   },
+  codexWorkerLaunch: {
+    method: "POST",
+    path: "/api/workers",
+    auth: "bearer",
+  },
+  codexWorkerStatus: {
+    method: "GET",
+    path: "/api/workers/:workerSessionId",
+    auth: "bearer",
+  },
+  codexWorkerFollowUp: {
+    method: "POST",
+    path: "/api/workers/:workerSessionId/followup",
+    auth: "bearer",
+  },
+  codexWorkerCancel: {
+    method: "POST",
+    path: "/api/workers/:workerSessionId/cancel",
+    auth: "bearer",
+  },
   stop: {
     method: "POST",
     path: "/stop",
